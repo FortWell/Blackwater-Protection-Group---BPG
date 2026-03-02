@@ -39,3 +39,9 @@ Notes:
 
 Current implementation uses an internal heuristic function (`estimate_ai_likelihood`) to unblock development quickly.
 Before production, replace this with a real detector API/provider.
+
+## CI and Safety
+
+- GitHub Actions CI: `.github/workflows/ci.yml`
+- Branch protection setup guide: `docs/BRANCH_PROTECTION_CHECKLIST.md`
+- Pre-push/release checklist: `docs/RELEASE_CHECKLIST.md`
