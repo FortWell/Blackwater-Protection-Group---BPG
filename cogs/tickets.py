@@ -214,12 +214,25 @@ async def _close_ticket_channel(
 ) -> None:
     assert isinstance(interaction.channel, discord.TextChannel)
     channel = interaction.channel
+    # Acknowledge first to avoid "Unknown interaction" on long transcript operations.
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+    except (discord.NotFound, discord.HTTPException):
+        return
+
     await _send_ticket_transcript(interaction, channel, owner_id)
     if close_reason:
         await channel.send(f"Ticket closed by {interaction.user.mention}. Reason: {close_reason}")
-    await interaction.response.send_message("Ticket closed. Deleting channel in 5 seconds.", ephemeral=True)
+    try:
+        await interaction.followup.send("Ticket closed. Deleting channel in 5 seconds.", ephemeral=True)
+    except (discord.NotFound, discord.HTTPException):
+        pass
     await asyncio.sleep(5)
-    await channel.delete(reason=f"Ticket closed by {interaction.user} | reason: {close_reason or 'No reason'}")
+    try:
+        await channel.delete(reason=f"Ticket closed by {interaction.user} | reason: {close_reason or 'No reason'}")
+    except discord.HTTPException:
+        pass
 
 
 def _message_to_text_line(msg: discord.Message) -> str:

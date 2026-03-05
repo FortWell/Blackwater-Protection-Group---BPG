@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import time
+import logging
 from typing import Any
 
 import aiohttp
 import discord
+
+log = logging.getLogger("nycrpp-bot.audit")
 
 
 class AuditLogger:
@@ -43,7 +46,7 @@ class AuditLogger:
         try:
             await self._webhook.send(embed=embed, username="NYCRPP Audit", wait=False)
         except Exception:
-            return
+            log.exception("Failed to send audit webhook message.")
 
 
 def format_interaction_context(interaction: discord.Interaction) -> list[tuple[str, str]]:

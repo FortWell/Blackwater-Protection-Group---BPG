@@ -42,12 +42,54 @@ class Database:
             )
             """
         )
+        await self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bot_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
         await self.conn.commit()
 
     async def execute(self, query: str, params: tuple = ()) -> None:
         if self.conn is None:
             raise RuntimeError("Database not initialized.")
         await self.conn.execute(query, params)
+        await self.conn.commit()
+
+    async def fetch_value(self, query: str, params: tuple = ()) -> str | None:
+        if self.conn is None:
+            raise RuntimeError("Database not initialized.")
+        async with self.conn.execute(query, params) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        first = row[0]
+        if first is None:
+            return None
+        return str(first)
+
+    async def get_setting(self, key: str, default: str = "") -> str:
+        value = await self.fetch_value(
+            "SELECT value FROM bot_settings WHERE key = ?",
+            (key,),
+        )
+        if value is None:
+            return default
+        return value
+
+    async def set_setting(self, key: str, value: str) -> None:
+        if self.conn is None:
+            raise RuntimeError("Database not initialized.")
+        await self.conn.execute(
+            """
+            INSERT INTO bot_settings (key, value)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
         await self.conn.commit()
 
     async def close(self) -> None:

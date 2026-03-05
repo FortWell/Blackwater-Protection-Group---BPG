@@ -2,11 +2,62 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+APPLICATION_REVIEW_ROLE_ID = 1478727168887623791
+APPLICATION_RESULTS_CHANNEL_ID = 1478729054092918784
+ACCEPT_BANNER_URL = (
+    "https://cdn.discordapp.com/attachments/1417875005387309137/"
+    "1469109135932133419/New_York_City_Roleplay_20250930_123917_0000.png"
+    "?ex=69a965c0&is=69a81440&hm=cc059403c9fadbfef382c7e294c040d3586680090260fd7d3f6e12e21f24e21d&"
+)
+APPLICATION_LOGO_URL = (
+    "https://cdn.discordapp.com/attachments/1417875005387309137/"
+    "1475920409709772951/Logo.png"
+    "?ex=69a920be&is=69a7cf3e&hm=469a475936121c8397acdd13b932e90ef83bea8f7f47feeea704340c2f2ad82f&"
+)
+
+ACCEPT_STATUS_CHOICES = [
+    app_commands.Choice(name="Accepted", value="Accepted"),
+]
+
+ACCEPT_REASON_CHOICES = [
+    app_commands.Choice(
+        name="Accepted. Application meets all requirements and shows strong understanding and effort.",
+        value="Accepted. Application meets all requirements and shows strong understanding and effort.",
+    ),
+    app_commands.Choice(
+        name="Accepted. Clear, professional, and well-written responses. All requirements met.",
+        value="Accepted. Clear, professional, and well-written responses. All requirements met.",
+    ),
+    app_commands.Choice(
+        name="Accepted. Good reasoning, maturity, and effort shown. Approved.",
+        value="Accepted. Good reasoning, maturity, and effort shown. Approved.",
+    ),
+]
+
+DENY_STATUS_CHOICES = [
+    app_commands.Choice(name="Denied", value="Denied"),
+]
+
+DENY_REASON_CHOICES = [
+    app_commands.Choice(
+        name="Denied. One or more responses were flagged as AI-generated. Zero-tolerance policy applies.",
+        value="Denied. One or more responses were flagged as AI-generated. Zero-tolerance policy applies.",
+    ),
+    app_commands.Choice(
+        name="Denied. Answers lacked detail or effort and do not meet Red Rock standards.",
+        value="Denied. Answers lacked detail or effort and do not meet Red Rock standards.",
+    ),
+    app_commands.Choice(
+        name="Denied. Application contained unprofessional or inappropriate content.",
+        value="Denied. Application contained unprofessional or inappropriate content.",
+    ),
+]
+
 
 def estimate_ai_likelihood(text: str) -> float:
     """
@@ -34,6 +85,63 @@ def estimate_ai_likelihood(text: str) -> float:
 class ApplicationsCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    def _can_manage_applications(self, interaction: discord.Interaction) -> bool:
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return False
+        if interaction.user.guild_permissions.administrator:
+            return True
+        return bool(interaction.user.get_role(APPLICATION_REVIEW_ROLE_ID))
+
+    async def _send_application_decision_embed(
+        self,
+        interaction: discord.Interaction,
+        *,
+        user: discord.Member,
+        status: str,
+        reason: str,
+        notes: str,
+        color: int,
+        title: str,
+    ) -> bool:
+        if interaction.guild is None:
+            return False
+
+        target_channel = interaction.guild.get_channel(APPLICATION_RESULTS_CHANNEL_ID)
+        if not isinstance(target_channel, discord.TextChannel):
+            try:
+                fetched = await interaction.guild.fetch_channel(APPLICATION_RESULTS_CHANNEL_ID)
+            except discord.HTTPException:
+                return False
+            if not isinstance(fetched, discord.TextChannel):
+                return False
+            target_channel = fetched
+
+        moderator = interaction.user
+        moderator_text = f"{moderator} ({moderator.id})" if moderator else "Unknown"
+        is_denied = status == "Denied"
+        if is_denied:
+            verdict_line = (
+                f"Unfortunately, your application has been {status}\n"
+                "You may be able to reapply in the future depending on department policy."
+            )
+        else:
+            verdict_line = (
+                f"Congratulations, your application has been {status}\n"
+                "Please make sure to review any onboarding information channels."
+            )
+        body = (
+            f"Your application {user.mention}\n"
+            f"Because of > {reason}\n"
+            f"Notes > {notes[:900]}\n\n"
+            f"{verdict_line}"
+        )
+        embed = discord.Embed(title="Application Results", description=body, color=color)
+        embed.set_image(url=ACCEPT_BANNER_URL)
+        embed.set_thumbnail(url=APPLICATION_LOGO_URL)
+        embed.set_footer(text="Federal Reserve Management", icon_url=APPLICATION_LOGO_URL)
+        await target_channel.send(content=user.mention, embed=embed)
+        return True
 
     async def _send_review_embed(
         self,
@@ -64,60 +172,6 @@ class ApplicationsCog(commands.Cog):
             embed.add_field(name=f"Q{idx}: {q}", value=value, inline=False)
         await channel.send(embed=embed)
 
-    async def _log_application_event(
-        self,
-        event_type: str,
-        user: discord.User | discord.Member,
-        guild: discord.Guild,
-        details: str = "",
-        color: int = 0x2B2D31,
-    ) -> None:
-        """Log application events to the audit webhook."""
-        now = int(time.time())
-        fields = [
-            ("User", f"{user.mention} (`{user.id}`)"),
-            ("Guild", f"{guild.name} (`{guild.id}`)"),
-            ("Timestamp", f"<t:{now}:F> (<t:{now}:R>)"),
-        ]
-        if details:
-            fields.append(("Details", details[:1024]))
-        
-        await self.bot.audit.send(
-            f"Application {event_type}",
-            f"Application event: {event_type}",
-            color=color,
-            fields=fields,
-        )
-
-    async def _log_answer(
-        self,
-        user: discord.User | discord.Member,
-        guild: discord.Guild,
-        question: str,
-        answer: str,
-        ai_score: float,
-    ) -> None:
-        """Log individual question answers."""
-        now = int(time.time())
-        answer_preview = answer[:500] + "..." if len(answer) > 500 else answer
-        color = 0xD63324 if ai_score >= 0.50 else 0x0B3D0B
-        
-        fields = [
-            ("User", f"{user.mention} (`{user.id}`)"),
-            ("Guild", f"{guild.name} (`{guild.id}`)"),
-            ("Question", question[:1024]),
-            ("Answer", answer_preview[:1024]),
-            ("AI Score", f"{ai_score:.0%}"),
-            ("Timestamp", f"<t:{now}:F> (<t:{now}:R>)"),
-        ]
-        
-        await self.bot.audit.send(
-            "Application Answer Received",
-            "A user answered an application question.",
-            color=color,
-            fields=fields,
-        )
-
     @app_commands.command(name="apply", description="Start the staff application in DMs.")
     async def apply(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
@@ -127,19 +181,9 @@ class ApplicationsCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         user = interaction.user
-        guild = interaction.guild
         questions = self.bot.config.application_questions
         answers: list[dict[str, str | float]] = []
         max_ai_score = 0.0
-
-        # Log application start
-        await self._log_application_event(
-            "Started",
-            user,
-            guild,
-            f"User started application with {len(questions)} questions",
-            color=0x1F8B4C,
-        )
 
         try:
             dm = await user.create_dm()
@@ -149,13 +193,6 @@ class ApplicationsCog(commands.Cog):
             )
         except discord.HTTPException:
             await interaction.followup.send("I could not DM you. Please enable DMs and try again.", ephemeral=True)
-            await self._log_application_event(
-                "Failed - DM Error",
-                user,
-                guild,
-                "Could not send DM to user",
-                color=0xB32020,
-            )
             return
 
         def check(msg: discord.Message) -> bool:
@@ -168,13 +205,6 @@ class ApplicationsCog(commands.Cog):
             except asyncio.TimeoutError:
                 await dm.send("Application timed out after 10 minutes without response.")
                 await interaction.followup.send("Application timed out in DMs.", ephemeral=True)
-                await self._log_application_event(
-                    "Timed Out",
-                    user,
-                    guild,
-                    f"Application timed out at question {idx}/{len(questions)}",
-                    color=0xB32020,
-                )
                 return
 
             score = estimate_ai_likelihood(reply.content)
@@ -187,9 +217,6 @@ class ApplicationsCog(commands.Cog):
                 }
             )
 
-            # Log the answer
-            await self._log_answer(user, guild, question, reply.content, score)
-
             if score >= self.bot.config.apply_min_ai_score:
                 await dm.send(
                     f"Your application was denied automatically. AI-likelihood score was {score:.0%} "
@@ -201,7 +228,7 @@ class ApplicationsCog(commands.Cog):
                     VALUES (?, ?, ?, 1, ?, ?)
                     """,
                     (
-                        guild.id,
+                        interaction.guild.id,
                         user.id,
                         "DENIED_AI_FLAG",
                         score,
@@ -209,18 +236,11 @@ class ApplicationsCog(commands.Cog):
                     ),
                 )
                 await self._send_review_embed(
-                    guild, user, answers, "DENIED_AI_FLAG", max_score=score
+                    interaction.guild, user, answers, "DENIED_AI_FLAG", max_score=score
                 )
                 await interaction.followup.send(
                     "Application started and auto-denied due to AI score threshold. Check DMs.",
                     ephemeral=True,
-                )
-                await self._log_application_event(
-                    "Denied - AI Flag",
-                    user,
-                    guild,
-                    f"Application auto-denied at question {idx} with AI score {score:.0%}",
-                    color=0xD63324,
                 )
                 return
 
@@ -230,7 +250,7 @@ class ApplicationsCog(commands.Cog):
             VALUES (?, ?, ?, 0, ?, ?)
             """,
             (
-                guild.id,
+                interaction.guild.id,
                 user.id,
                 "PENDING_REVIEW",
                 max_ai_score,
@@ -238,19 +258,98 @@ class ApplicationsCog(commands.Cog):
             ),
         )
         await self._send_review_embed(
-            guild, user, answers, "PENDING_REVIEW", max_score=max_ai_score
+            interaction.guild, user, answers, "PENDING_REVIEW", max_score=max_ai_score
         )
         await dm.send("Application submitted successfully and is now pending staff review.")
         await interaction.followup.send("Application completed in DMs.", ephemeral=True)
-        
-        # Log successful completion
-        await self._log_application_event(
-            "Completed",
-            user,
-            guild,
-            f"Application submitted with {len(answers)} answers. Max AI score: {max_ai_score:.0%}",
-            color=0x0B3D0B,
+
+    @app_commands.command(name="accept", description="Accept or deny an application with professional review output.")
+    @app_commands.describe(
+        user="Applicant to review",
+        status="Application status",
+        reason="Decision reason",
+        notes="Moderator notes",
+    )
+    @app_commands.choices(status=ACCEPT_STATUS_CHOICES, reason=ACCEPT_REASON_CHOICES)
+    async def accept(
+        self,
+        interaction: discord.Interaction,
+        user: discord.Member,
+        status: app_commands.Choice[str],
+        reason: app_commands.Choice[str],
+        notes: str,
+    ) -> None:
+        if interaction.guild is None or interaction.channel is None:
+            await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+            return
+        if not self._can_manage_applications(interaction):
+            await interaction.response.send_message(
+                f"You need <@&{APPLICATION_REVIEW_ROLE_ID}> to use this command.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        sent = await self._send_application_decision_embed(
+            interaction,
+            user=user,
+            status=status.value,
+            reason=reason.value,
+            notes=notes,
+            color=0x1F8B4C,
+            title="Application Review Result",
         )
+        if not sent:
+            await interaction.followup.send(
+                f"Could not send result: channel `{APPLICATION_RESULTS_CHANNEL_ID}` not found or inaccessible.",
+                ephemeral=True,
+            )
+            return
+        await interaction.followup.send("Application decision posted.", ephemeral=True)
+
+    @app_commands.command(name="deny", description="Deny or accept an application with professional review output.")
+    @app_commands.describe(
+        user="Applicant to review",
+        status="Application status",
+        reason="Decision reason",
+        notes="Moderator notes",
+    )
+    @app_commands.choices(status=DENY_STATUS_CHOICES, reason=DENY_REASON_CHOICES)
+    async def deny(
+        self,
+        interaction: discord.Interaction,
+        user: discord.Member,
+        status: app_commands.Choice[str],
+        reason: app_commands.Choice[str],
+        notes: str,
+    ) -> None:
+        if interaction.guild is None or interaction.channel is None:
+            await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+            return
+        if not self._can_manage_applications(interaction):
+            await interaction.response.send_message(
+                f"You need <@&{APPLICATION_REVIEW_ROLE_ID}> to use this command.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        sent = await self._send_application_decision_embed(
+            interaction,
+            user=user,
+            status=status.value,
+            reason=reason.value,
+            notes=notes,
+            color=0xB32020,
+            title="Application Review Result",
+        )
+        if not sent:
+            await interaction.followup.send(
+                f"Could not send result: channel `{APPLICATION_RESULTS_CHANNEL_ID}` not found or inaccessible.",
+                ephemeral=True,
+            )
+            return
+        await interaction.followup.send("Application decision posted.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

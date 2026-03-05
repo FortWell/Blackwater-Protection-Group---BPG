@@ -23,6 +23,15 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 log = logging.getLogger("nycrpp-bot")
+BOT_LOCKDOWN_ROLE_ID = 1471151522657079306
+
+
+class NYCRPPCommandTree(app_commands.CommandTree):
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        checker = getattr(self.client, "is_command_allowed_in_lockdown", None)
+        if checker is None:
+            return True
+        return await checker(interaction)
 
 
 def _acquire_single_instance_lock() -> int | None:
@@ -46,15 +55,20 @@ class NYCRPPBot(commands.Bot):
         intents = discord.Intents.default()
         intents.members = config.enable_members_intent
         intents.message_content = config.enable_message_content_intent
-        super().__init__(command_prefix="!", intents=intents)
+        super().__init__(command_prefix="!", intents=intents, tree_cls=NYCRPPCommandTree)
         self.config = config
         self.db = Database(config.database_path)
         self.audit = AuditLogger(config.bot_audit_webhook_url)
         self._web_runner: web.AppRunner | None = None
         self.started_at_monotonic = time.monotonic()
+        self.bot_lockdown_enabled = False
+        self.bot_lockdown_role_id = BOT_LOCKDOWN_ROLE_ID
 
     async def setup_hook(self) -> None:
         await self.db.init()
+        self.bot_lockdown_enabled = (
+            await self.db.get_setting("bot_lockdown_enabled", "0")
+        ) == "1"
         await self.audit.start()
         await self._start_health_server_if_needed()
         for extension in (
@@ -110,6 +124,15 @@ class NYCRPPBot(commands.Bot):
                 except Exception:
                     log.exception("Guild sync failed for %s (%s); continuing.", guild.name, guild.id)
 
+    async def is_command_allowed_in_lockdown(self, interaction: discord.Interaction) -> bool:
+        if not self.bot_lockdown_enabled:
+            return True
+        if not isinstance(interaction.user, discord.Member):
+            return False
+        if interaction.user.get_role(self.bot_lockdown_role_id):
+            return True
+        return False
+
     async def on_ready(self) -> None:
         if self.user is None:
             return
@@ -152,7 +175,10 @@ class NYCRPPBot(commands.Bot):
         # Always send a user-visible error so interactions do not appear as "did not respond".
         msg = "Command failed. Please try again."
         if isinstance(error, app_commands.CheckFailure):
-            msg = "You do not have permission to use this command."
+            if self.bot_lockdown_enabled:
+                msg = f"Bot is in lockdown. Only <@&{self.bot_lockdown_role_id}> can use bot commands."
+            else:
+                msg = str(error) if str(error) else "You do not have permission to use this command."
         elif isinstance(error, app_commands.CommandOnCooldown):
             msg = "This command is on cooldown. Try again shortly."
         elif isinstance(error, app_commands.CommandInvokeError):
