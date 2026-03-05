@@ -27,6 +27,8 @@ PROMOTION_THUMBNAIL_URL = (
 )
 CENTRAL_REQUIRED_ROLE_ID = 1477331892448526456
 CENTRAL_TARGET_CHANNEL_ID = 1477320169914372168
+FPS_COMMAND_ROLE_ID = 1479214803708022945
+BAOD_COMMAND_ROLE_ID = 1479215347986075859
 
 
 class StaffCog(commands.Cog):
@@ -45,6 +47,16 @@ class StaffCog(commands.Cog):
             return False
         member_role_ids = {role.id for role in interaction.user.roles}
         return bool(member_role_ids.intersection(allowed_ids))
+
+    def _can_use_fps_commands(self, interaction: discord.Interaction) -> bool:
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return False
+        return bool(interaction.user.get_role(FPS_COMMAND_ROLE_ID))
+
+    def _can_use_baod_commands(self, interaction: discord.Interaction) -> bool:
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return False
+        return bool(interaction.user.get_role(BAOD_COMMAND_ROLE_ID))
 
     async def _resolve_member(
         self,
@@ -270,6 +282,12 @@ class StaffCog(commands.Cog):
         new_rank: discord.Role,
         reason: str = ".",
     ) -> None:
+        if not self._can_use_baod_commands(interaction):
+            await interaction.response.send_message(
+                f"Only <@&{BAOD_COMMAND_ROLE_ID}> can use this command.",
+                ephemeral=True,
+            )
+            return
         await self._run_promotion(
             interaction,
             user,
@@ -281,6 +299,7 @@ class StaffCog(commands.Cog):
                 "You've been issued a promotion. Congratulations!"
             ),
             channel_id=self.bot.config.staff_promotion_channel_id,
+            require_manage_permission=False,
         )
 
     @app_commands.command(name="baod-infraction", description="BAOD infraction command.")
@@ -299,6 +318,12 @@ class StaffCog(commands.Cog):
         punishment: app_commands.Choice[str],
         reason: str = "No reason provided.",
     ) -> None:
+        if not self._can_use_baod_commands(interaction):
+            await interaction.response.send_message(
+                f"Only <@&{BAOD_COMMAND_ROLE_ID}> can use this command.",
+                ephemeral=True,
+            )
+            return
         await self._run_infraction(
             interaction,
             user,
@@ -311,6 +336,7 @@ class StaffCog(commands.Cog):
                 "about your recent infraction will result in another strike."
             ),
             channel_id=self.bot.config.staff_infraction_channel_id,
+            require_manage_permission=False,
         )
 
     @app_commands.command(name="fps-promotion", description="FPS promotion command.")
@@ -326,6 +352,12 @@ class StaffCog(commands.Cog):
         new_rank: discord.Role,
         reason: str = ".",
     ) -> None:
+        if not self._can_use_fps_commands(interaction):
+            await interaction.response.send_message(
+                f"Only <@&{FPS_COMMAND_ROLE_ID}> can use this command.",
+                ephemeral=True,
+            )
+            return
         await self._run_promotion(
             interaction,
             user,
@@ -337,6 +369,7 @@ class StaffCog(commands.Cog):
                 "You have been issued a promotion. Congratulations!"
             ),
             channel_id=self.bot.config.fps_promotion_channel_id or self.bot.config.staff_promotion_channel_id,
+            require_manage_permission=False,
         )
 
     @app_commands.command(name="fps-infraction", description="FPS infraction command.")
@@ -355,6 +388,12 @@ class StaffCog(commands.Cog):
         punishment: app_commands.Choice[str],
         reason: str = "No reason provided.",
     ) -> None:
+        if not self._can_use_fps_commands(interaction):
+            await interaction.response.send_message(
+                f"Only <@&{FPS_COMMAND_ROLE_ID}> can use this command.",
+                ephemeral=True,
+            )
+            return
         await self._run_infraction(
             interaction,
             user,
@@ -366,6 +405,7 @@ class StaffCog(commands.Cog):
                 "Actions are being taken on your account. Repeated violations may escalate penalties."
             ),
             channel_id=self.bot.config.fps_infraction_channel_id or self.bot.config.staff_infraction_channel_id,
+            require_manage_permission=False,
         )
 
     @app_commands.command(name="cetral-promote", description="Central promotion command.")
@@ -384,10 +424,7 @@ class StaffCog(commands.Cog):
         if not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message("Permission denied.", ephemeral=True)
             return
-        if (
-            not interaction.user.guild_permissions.administrator
-            and not interaction.user.get_role(CENTRAL_REQUIRED_ROLE_ID)
-        ):
+        if not interaction.user.get_role(CENTRAL_REQUIRED_ROLE_ID):
             await interaction.response.send_message("You do not have permission for this command.", ephemeral=True)
             return
         await self._run_promotion(
@@ -423,10 +460,7 @@ class StaffCog(commands.Cog):
         if not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message("Permission denied.", ephemeral=True)
             return
-        if (
-            not interaction.user.guild_permissions.administrator
-            and not interaction.user.get_role(CENTRAL_REQUIRED_ROLE_ID)
-        ):
+        if not interaction.user.get_role(CENTRAL_REQUIRED_ROLE_ID):
             await interaction.response.send_message("You do not have permission for this command.", ephemeral=True)
             return
         await self._run_infraction(

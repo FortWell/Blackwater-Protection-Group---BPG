@@ -20,6 +20,7 @@ TICKET_TRANSCRIPT_WEBHOOK_URL = (
     "https://discord.com/api/webhooks/1477336234882895953/"
     "6oBiEDwE9Um6_nOM12wZnIbfxIWOxSlg0bmEwxVeFzNYWl6zmxUBMET0erJYSucq9Yh0"
 )
+APPLICATION_REVIEW_ROLE_ID = 1478727168887623791
 
 
 @dataclass(slots=True)
@@ -89,6 +90,10 @@ def _support_role_for_type(cfg, ticket_type_key: str) -> int:
     if ticket_type_key == "general":
         return cfg.ticket_general_support_role_id
     return 0
+
+
+def _application_owner_for_topic(data: dict[str, str]) -> int | None:
+    return _topic_value_int(data, "application-ticket")
 
 
 async def _fetch_roblox_user(username: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -197,8 +202,18 @@ def _can_manage_ticket(interaction: discord.Interaction) -> tuple[bool, int | No
         return False, None
     if not isinstance(interaction.user, discord.Member):
         return False, None
+    if interaction.user.guild_permissions.administrator:
+        data = _topic_dict(interaction.channel.topic)
+        owner_id = _application_owner_for_topic(data) or _topic_value_int(data, "ticket-owner")
+        return True, owner_id
 
     data = _topic_dict(interaction.channel.topic)
+    app_owner_id = _application_owner_for_topic(data)
+    if app_owner_id is not None:
+        is_owner = interaction.user.id == app_owner_id
+        is_app_staff = bool(interaction.user.get_role(APPLICATION_REVIEW_ROLE_ID))
+        return is_owner or is_app_staff, app_owner_id
+
     owner_id = _topic_value_int(data, "ticket-owner")
     ticket_type = data.get("ticket-type", "")
     support_role_id = _support_role_for_type(cfg, ticket_type)
@@ -317,6 +332,11 @@ class CloseRequestDecisionView(discord.ui.View):
             return False
         return True
 
+    def _disable_buttons(self) -> None:
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+
     @discord.ui.button(label="Accept", style=discord.ButtonStyle.success, custom_id="ticket:close_request:accept")
     async def accept(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         if not await self._only_owner(interaction):
@@ -324,7 +344,7 @@ class CloseRequestDecisionView(discord.ui.View):
         if interaction.guild is None or not isinstance(interaction.channel, discord.TextChannel):
             await interaction.response.send_message("This can only be used in a ticket channel.", ephemeral=True)
             return
-        self.disable_all_items()
+        self._disable_buttons()
         try:
             if interaction.message:
                 await interaction.message.edit(view=self)
@@ -336,7 +356,7 @@ class CloseRequestDecisionView(discord.ui.View):
     async def deny(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         if not await self._only_owner(interaction):
             return
-        self.disable_all_items()
+        self._disable_buttons()
         try:
             if interaction.message:
                 await interaction.message.edit(view=self)
@@ -365,19 +385,25 @@ class TicketReasonModal(discord.ui.Modal, title="Ticket Reason"):
         self.type_key = type_key
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+        except (discord.NotFound, discord.HTTPException):
+            return
+
         bot: commands.Bot = interaction.client
         cfg = bot.config
         guild = interaction.guild
         if guild is None or not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message("Tickets can only be created in a server.", ephemeral=True)
+            await interaction.followup.send("Tickets can only be created in a server.", ephemeral=True)
             return
 
         ticket_type = _ticket_types(cfg).get(self.type_key)
         if ticket_type is None:
-            await interaction.response.send_message("Invalid ticket type.", ephemeral=True)
+            await interaction.followup.send("Invalid ticket type.", ephemeral=True)
             return
         if not ticket_type.category_id:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"{ticket_type.label} ticket category is not configured.",
                 ephemeral=True,
             )
@@ -385,7 +411,7 @@ class TicketReasonModal(discord.ui.Modal, title="Ticket Reason"):
 
         category = guild.get_channel(ticket_type.category_id)
         if not isinstance(category, discord.CategoryChannel):
-            await interaction.response.send_message(f"{ticket_type.label} category was not found.", ephemeral=True)
+            await interaction.followup.send(f"{ticket_type.label} category was not found.", ephemeral=True)
             return
 
         for ch in category.channels:
@@ -395,7 +421,7 @@ class TicketReasonModal(discord.ui.Modal, title="Ticket Reason"):
             owner_id = _topic_value_int(data, "ticket-owner")
             existing_type = data.get("ticket-type")
             if owner_id == interaction.user.id and existing_type == ticket_type.key:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"You already have an open {ticket_type.label} ticket: {ch.mention}",
                     ephemeral=True,
                 )
@@ -445,7 +471,7 @@ class TicketReasonModal(discord.ui.Modal, title="Ticket Reason"):
         )
         await ticket_channel.send(embed=_ticket_reason_embed(str(self.reason)))
         await ticket_channel.send(view=TicketActionsView())
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"{ticket_type.label} ticket created: {ticket_channel.mention}",
             ephemeral=True,
         )
@@ -462,6 +488,26 @@ async def _claim_ticket(interaction: discord.Interaction) -> None:
         return
 
     data = _topic_dict(interaction.channel.topic)
+    app_owner_id = _application_owner_for_topic(data)
+    if app_owner_id is not None:
+        if (
+            not interaction.user.guild_permissions.administrator
+            and not interaction.user.get_role(APPLICATION_REVIEW_ROLE_ID)
+        ):
+            await interaction.response.send_message("Only application staff can claim this ticket.", ephemeral=True)
+            return
+        claimed_by = _topic_value_int(data, "claimed-by")
+        if claimed_by and claimed_by != interaction.user.id:
+            await interaction.response.send_message("This ticket is already claimed by another staff member.", ephemeral=True)
+            return
+        await interaction.channel.edit(
+            topic=f"application-ticket:{app_owner_id};claimed-by:{interaction.user.id}"
+        )
+        await interaction.response.send_message(
+            f"This application ticket has been claimed by: {interaction.user.display_name}."
+        )
+        return
+
     ticket_type = data.get("ticket-type", "")
     support_role_id = _support_role_for_type(cfg, ticket_type)
     if not support_role_id or not interaction.user.get_role(support_role_id):

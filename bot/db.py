@@ -50,6 +50,33 @@ class Database:
             )
             """
         )
+        await self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS application_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                strike_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        await self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS application_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                content TEXT,
+                strike_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(session_id) REFERENCES application_sessions(id)
+            )
+            """
+        )
         await self.conn.commit()
 
     async def execute(self, query: str, params: tuple = ()) -> None:
@@ -57,6 +84,13 @@ class Database:
             raise RuntimeError("Database not initialized.")
         await self.conn.execute(query, params)
         await self.conn.commit()
+
+    async def execute_insert(self, query: str, params: tuple = ()) -> int:
+        if self.conn is None:
+            raise RuntimeError("Database not initialized.")
+        cursor = await self.conn.execute(query, params)
+        await self.conn.commit()
+        return int(cursor.lastrowid)
 
     async def fetch_value(self, query: str, params: tuple = ()) -> str | None:
         if self.conn is None:
