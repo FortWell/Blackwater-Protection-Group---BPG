@@ -21,6 +21,7 @@ TICKET_TRANSCRIPT_WEBHOOK_URL = (
     "6oBiEDwE9Um6_nOM12wZnIbfxIWOxSlg0bmEwxVeFzNYWl6zmxUBMET0erJYSucq9Yh0"
 )
 APPLICATION_REVIEW_ROLE_ID = 1478727168887623791
+SECURITY_TICKET_BLOCKED_ROLE_ID = 1478860250869399733
 
 
 @dataclass(slots=True)
@@ -402,6 +403,15 @@ class TicketReasonModal(discord.ui.Modal, title="Ticket Reason"):
         if ticket_type is None:
             await interaction.followup.send("Invalid ticket type.", ephemeral=True)
             return
+        if (
+            ticket_type.key == "security"
+            and interaction.user.get_role(SECURITY_TICKET_BLOCKED_ROLE_ID)
+        ):
+            await interaction.followup.send(
+                "You can't open this ticket. Go open a General Support Ticket, mate.",
+                ephemeral=True,
+            )
+            return
         if not ticket_type.category_id:
             await interaction.followup.send(
                 f"{ticket_type.label} ticket category is not configured.",
@@ -555,6 +565,24 @@ class TicketCreateView(discord.ui.View):
         super().__init__(timeout=None)
 
     async def _open_reason_modal(self, interaction: discord.Interaction, type_key: str) -> None:
+        if type_key == "security":
+            if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+                await interaction.response.send_message("This can only be used in a server.", ephemeral=True)
+                return
+            is_blocked = any(role.id == SECURITY_TICKET_BLOCKED_ROLE_ID for role in interaction.user.roles)
+            if not is_blocked:
+                # Fetch fresh member roles in case cache is stale.
+                try:
+                    fresh = await interaction.guild.fetch_member(interaction.user.id)
+                    is_blocked = any(role.id == SECURITY_TICKET_BLOCKED_ROLE_ID for role in fresh.roles)
+                except discord.HTTPException:
+                    is_blocked = False
+            if is_blocked:
+                await interaction.response.send_message(
+                    "You can't open this ticket. Go open a General Support Ticket, mate.",
+                    ephemeral=True,
+                )
+                return
         await interaction.response.send_modal(TicketReasonModal(type_key))
 
     @discord.ui.button(label="Management", style=discord.ButtonStyle.danger, custom_id="ticket:create:management")
@@ -563,6 +591,15 @@ class TicketCreateView(discord.ui.View):
 
     @discord.ui.button(label="Security", style=discord.ButtonStyle.primary, custom_id="ticket:create:security")
     async def security(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("This can only be used in a server.", ephemeral=True)
+            return
+        if interaction.user.get_role(SECURITY_TICKET_BLOCKED_ROLE_ID):
+            await interaction.response.send_message(
+                "You can't open this ticket. Go open a General Support Ticket, mate.",
+                ephemeral=True,
+            )
+            return
         await self._open_reason_modal(interaction, "security")
 
     @discord.ui.button(label="General", style=discord.ButtonStyle.success, custom_id="ticket:create:general")

@@ -77,6 +77,19 @@ class Database:
             )
             """
         )
+        await self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS application_decisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                applicant_id INTEGER NOT NULL,
+                applicant_tag TEXT NOT NULL,
+                status TEXT NOT NULL,
+                notes TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
         await self.conn.commit()
 
     async def execute(self, query: str, params: tuple = ()) -> None:
@@ -103,6 +116,13 @@ class Database:
         if first is None:
             return None
         return str(first)
+
+    async def fetch_rows(self, query: str, params: tuple = ()) -> list[aiosqlite.Row]:
+        if self.conn is None:
+            raise RuntimeError("Database not initialized.")
+        async with self.conn.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+        return rows
 
     async def get_setting(self, key: str, default: str = "") -> str:
         value = await self.fetch_value(

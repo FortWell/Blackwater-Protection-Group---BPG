@@ -36,6 +36,16 @@ def _as_bool(name: str, default: bool = False) -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
+def _as_float(name: str, default: float) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
 @dataclass(slots=True)
 class BotConfig:
     token: str
@@ -61,6 +71,14 @@ class BotConfig:
     application_review_channel_id: int
     apply_min_ai_score: float
     application_questions: list[str]
+    ai_provider: str
+    groq_api_key: str
+    groq_model: str
+    cloudflare_api_token: str
+    cloudflare_account_id: str
+    cloudflare_model: str
+    ai_error_webhook_url: str
+    ai_request_timeout_seconds: float
     asset_logo_url: str
 
     @classmethod
@@ -107,5 +125,13 @@ class BotConfig:
             application_review_channel_id=_as_int("APPLICATION_REVIEW_CHANNEL_ID"),
             apply_min_ai_score=ai_threshold,
             application_questions=questions,
+            ai_provider=os.getenv("AI_PROVIDER", "heuristic").strip().lower(),
+            groq_api_key=os.getenv("GROQ_API_KEY", "").strip(),
+            groq_model=os.getenv("GROQ_MODEL", "llama-3.1-8b-instant").strip() or "llama-3.1-8b-instant",
+            cloudflare_api_token=os.getenv("CLOUDFLARE_API_TOKEN", "").strip(),
+            cloudflare_account_id=os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip(),
+            cloudflare_model=os.getenv("CLOUDFLARE_MODEL", "@cf/meta/llama-3.1-8b-instruct").strip() or "@cf/meta/llama-3.1-8b-instruct",
+            ai_error_webhook_url=os.getenv("AI_ERROR_WEBHOOK_URL", "").strip(),
+            ai_request_timeout_seconds=_as_float("AI_REQUEST_TIMEOUT_SECONDS", 12.0),
             asset_logo_url=os.getenv("ASSET_LOGO_URL", "").strip(),
         )

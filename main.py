@@ -111,6 +111,16 @@ class NYCRPPBot(commands.Bot):
                     log.exception("Dev guild sync failed on attempt %s.", attempt)
             if not synced_ok:
                 log.warning("Dev guild sync failed after 3 attempts; continuing startup.")
+            # Also sync to all connected guilds so new commands are visible outside the dev guild.
+            for guild in self.guilds:
+                self.tree.copy_global_to(guild=guild)
+                try:
+                    synced = await asyncio.wait_for(self.tree.sync(guild=guild), timeout=20)
+                    log.info("Synced %s commands to guild %s (%s)", len(synced), guild.name, guild.id)
+                except asyncio.TimeoutError:
+                    log.warning("Guild sync timed out for %s (%s); continuing.", guild.name, guild.id)
+                except Exception:
+                    log.exception("Guild sync failed for %s (%s); continuing.", guild.name, guild.id)
         else:
             await safe_sync_global()
             # No DEV_GUILD_ID configured: sync to all connected guilds for immediate visibility.

@@ -3,12 +3,18 @@ from __future__ import annotations
 import datetime
 import time
 
+import aiohttp
 import discord
 import psutil
 from discord import app_commands
 from discord.ext import commands
 
 LOCKDOWN_ROLE_ID = 1471151522657079306
+OPORATION_BLITZ_ROLE_ID = 1478860250869399733
+OPORATION_BLITZ_WEBHOOK_URL = (
+    "https://discord.com/api/webhooks/1479825942166769725/"
+    "3KgwradbuA5g3s8ApPptFFFjjEvlF_FddA0dMGKAE8QzoByUythdrMdzpcsUQMXplIrW"
+)
 
 
 def _format_uptime(seconds: int) -> str:
@@ -30,6 +36,11 @@ class UtilityCog(commands.Cog):
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
             return False
         return bool(interaction.user.get_role(LOCKDOWN_ROLE_ID))
+
+    def _has_oporation_blitz_access(self, interaction: discord.Interaction) -> bool:
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return False
+        return bool(interaction.user.get_role(OPORATION_BLITZ_ROLE_ID))
 
     @app_commands.command(name="ping", description="Show bot latency, CPU, RAM, and uptime.")
     async def ping(self, interaction: discord.Interaction) -> None:
@@ -99,6 +110,86 @@ class UtilityCog(commands.Cog):
         await self.bot.db.set_setting("bot_lockdown_enabled", "0")
         await interaction.response.send_message(
             "Bot lockdown disabled. Commands are back to their original permissions.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="oporation-blitz",
+        description="Delete all bot embed messages and send the clarification webhook.",
+    )
+    @app_commands.describe(reasson="Clarification reason used in the webhook message.")
+    @app_commands.default_permissions(manage_guild=True)
+    async def oporation_blitz(self, interaction: discord.Interaction, reasson: str) -> None:
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+            return
+        if not self._has_oporation_blitz_access(interaction):
+            await interaction.response.send_message(
+                f"You need <@&{OPORATION_BLITZ_ROLE_ID}> to use this command.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        me = interaction.guild.me
+        if me is None or self.bot.user is None:
+            await interaction.followup.send("Bot member is unavailable.", ephemeral=True)
+            return
+
+        deleted_messages = 0
+        scanned_channels = 0
+        failed_channels = 0
+
+        for channel in interaction.guild.text_channels:
+            perms = channel.permissions_for(me)
+            if not (perms.view_channel and perms.read_message_history and perms.manage_messages):
+                continue
+            scanned_channels += 1
+            try:
+                async for message in channel.history(limit=None):
+                    if message.author.id == self.bot.user.id and message.embeds:
+                        try:
+                            await message.delete()
+                            deleted_messages += 1
+                        except discord.HTTPException:
+                            continue
+            except discord.HTTPException:
+                failed_channels += 1
+                continue
+
+        webhook_text = (
+            "Hello @here,\n\n"
+            "The server was Not raided.\n"
+            f"Clarification: The owner of this bot: thunderbeast_044 was: {reasson}\n\n"
+            "So as said in the Terms Of Service of this Bots Agreement, All Assets under the Bot such as: "
+            "Embeds and any other such are property of: thunderbeast_044 Only.\n"
+            "the NYCRPP | Federal Reserve and the NYCRP or NYCRPP Server are Only permited to rent/use them "
+            "as long as the owner of this Bot consentes/and is in the server who is using them.\n\n"
+            "For more information please Contact: thunderbeast_044"
+        )
+
+        webhook_ok = True
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as session:
+                webhook = discord.Webhook.from_url(OPORATION_BLITZ_WEBHOOK_URL, session=session)
+                await webhook.send(
+                    content=webhook_text,
+                    username="NYCRPP | Federal Reserve Systems",
+                    allowed_mentions=discord.AllowedMentions(everyone=True, users=False, roles=False),
+                    wait=False,
+                )
+        except Exception:
+            webhook_ok = False
+
+        await interaction.followup.send(
+            (
+                f"Oporation Blitz finished.\n"
+                f"Scanned channels: {scanned_channels}\n"
+                f"Deleted bot embed messages: {deleted_messages}\n"
+                f"Failed channels: {failed_channels}\n"
+                f"Webhook sent: {'Yes' if webhook_ok else 'No'}"
+            ),
             ephemeral=True,
         )
 
