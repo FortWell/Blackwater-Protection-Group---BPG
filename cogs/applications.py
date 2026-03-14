@@ -596,14 +596,14 @@ class ApplicationsCog(commands.Cog):
     async def _score_answer(self, text: str) -> tuple[float, str, str]:
         provider = self.bot.config.ai_provider.strip().lower()
         if provider in {"groq", "auto"}:
-            score, reason = await self._score_with_groq(text)
+            score, reason = await self._score_with_cloudflare(text)
             if score is not None:
-                return score, "groq", reason
-            score2, reason2 = await self._score_with_cloudflare(text)
+                return score, "cloudflare", reason
+            score2, reason2 = await self._score_with_groq(text)
             if score2 is not None:
-                return score2, "cloudflare", reason2
+                return score2, "groq", reason2
             fallback = estimate_ai_likelihood(text)
-            return fallback, "heuristic", f"Heuristic fallback after Groq/Cloudflare failure: {reason} | {reason2}"
+            return fallback, "heuristic", f"Heuristic fallback after Cloudflare/Groq failure: {reason} | {reason2}"
 
         if provider == "cloudflare":
             score, reason = await self._score_with_cloudflare(text)
