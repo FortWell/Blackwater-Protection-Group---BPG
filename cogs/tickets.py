@@ -11,6 +11,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.embed_utils import apply_embed_template
 
 FOOTER_ICON_URL = (
     "https://cdn.discordapp.com/attachments/1417875005387309137/"
@@ -144,6 +145,7 @@ async def _fetch_roblox_user(username: str) -> tuple[dict[str, Any] | None, str 
 
 
 def _ticket_info_embed(
+    cfg,
     member: discord.Member,
     ticket_type: TicketType,
     ticket_id: int,
@@ -183,16 +185,33 @@ def _ticket_info_embed(
         inline=False,
     )
     embed.set_footer(text="Powered by Federal Reserve Management", icon_url=FOOTER_ICON_URL)
+    apply_embed_template(
+        embed,
+        cfg.embed_templates.get("ticket_info"),
+        context={
+            "ticket_type": ticket_type.label,
+            "ticket_id": ticket_id,
+            "user": member.mention,
+            "user_id": member.id,
+        },
+    )
     return embed
 
 
-def _ticket_reason_embed(reason: str) -> discord.Embed:
+def _ticket_reason_embed(cfg, reason: str) -> discord.Embed:
     embed = discord.Embed(
         title="What is the reason for the ticket?",
         description=reason,
         color=0x2B2D31,
     )
     embed.set_footer(text="Powered by Federal Reserve Management", icon_url=FOOTER_ICON_URL)
+    apply_embed_template(
+        embed,
+        cfg.embed_templates.get("ticket_reason"),
+        context={
+            "reason": reason,
+        },
+    )
     return embed
 
 
@@ -472,6 +491,7 @@ class TicketReasonModal(discord.ui.Modal, title="Ticket Reason"):
         roblox_info, roblox_error = await _fetch_roblox_user(str(self.roblox_username))
         await ticket_channel.send(
             embed=_ticket_info_embed(
+                cfg,
                 interaction.user,
                 ticket_type,
                 ticket_id,
@@ -479,7 +499,7 @@ class TicketReasonModal(discord.ui.Modal, title="Ticket Reason"):
                 roblox_error=roblox_error,
             )
         )
-        await ticket_channel.send(embed=_ticket_reason_embed(str(self.reason)))
+        await ticket_channel.send(embed=_ticket_reason_embed(cfg, str(self.reason)))
         await ticket_channel.send(view=TicketActionsView())
         await interaction.followup.send(
             f"{ticket_type.label} ticket created: {ticket_channel.mention}",
@@ -649,6 +669,10 @@ class TicketsCog(commands.Cog):
                 "• General Ticket"
             ),
             color=0x0B1E3D,
+        )
+        apply_embed_template(
+            embed,
+            self.bot.config.embed_templates.get("ticket_panel"),
         )
 
         async for msg in interaction.channel.history(limit=30):

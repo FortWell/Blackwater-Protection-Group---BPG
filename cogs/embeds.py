@@ -1,17 +1,31 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import re
+from dataclasses import dataclass
 
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+log = logging.getLogger(__name__)
 
 MAX_TITLE_LEN = 256
 MAX_DESCRIPTION_LEN = 4096
 MAX_FIELD_NAME_LEN = 256
 MAX_FIELD_VALUE_LEN = 1024
 MAX_FOOTER_TEXT_LEN = 2048
+MAX_BUTTON_LABEL_LEN = 80
+MAX_BUTTON_DESCRIPTION_LEN = 4096
+MAX_BUTTONS = 2
+
+
+@dataclass(slots=True)
+class ButtonSpec:
+    label: str
+    response: str
 
 
 def _trim_text(value: str | None, limit: int) -> str | None:
@@ -73,6 +87,177 @@ def _preserve_description_structure(text: str) -> str:
     return normalized
 
 
+async def _read_attachment_text(
+    attachment: discord.Attachment,
+    *,
+    kind: str,
+) -> tuple[str | None, str | None]:
+    if attachment.size > 16_000:
+        return None, f"{kind} file is too large. Keep it under 16 KB."
+
+    try:
+        raw = await attachment.read()
+    except discord.HTTPException:
+        return None, f"Failed to read the {kind.lower()} file."
+
+    for encoding in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            return raw.decode(encoding), None
+        except UnicodeDecodeError:
+            continue
+    return None, f"Could not decode the {kind.lower()} file. Use a UTF-8 text file."
+
+
+def _normalize_button_spec(label: str, response: str) -> ButtonSpec | None:
+    label_final = _trim_text(label.strip(), MAX_BUTTON_LABEL_LEN)
+    response_final = _trim_text(_preserve_description_structure(response).strip(), MAX_BUTTON_DESCRIPTION_LEN)
+    if not label_final or not response_final:
+        return None
+    return ButtonSpec(label=label_final, response=response_final)
+
+
+def _parse_button_spec_value(value: object) -> ButtonSpec | None:
+    if isinstance(value, dict):
+        label = value.get("label") or value.get("text") or value.get("name")
+        response = value.get("response") or value.get("description") or value.get("content")
+        if not isinstance(label, str) or not isinstance(response, str):
+            return None
+        return _normalize_button_spec(label, response)
+
+    if isinstance(value, (list, tuple)) and len(value) >= 2:
+        label, response = value[0], value[1]
+        if not isinstance(label, str) or not isinstance(response, str):
+            return None
+        return _normalize_button_spec(label, response)
+
+    return None
+
+
+def _parse_buttons_json(parsed: object) -> list[ButtonSpec] | None:
+    items: list[object] = []
+    if isinstance(parsed, list):
+        items = list(parsed)
+    elif isinstance(parsed, dict):
+        buttons = parsed.get("buttons")
+        if isinstance(buttons, list):
+            items = list(buttons)
+        else:
+            for key in ("button1", "button2"):
+                if key in parsed:
+                    items.append(parsed[key])
+            if not items:
+                for index in (1, 2):
+                    label = parsed.get(f"button{index}_label") or parsed.get(f"button{index}_text")
+                    response = (
+                        parsed.get(f"button{index}_response")
+                        or parsed.get(f"button{index}_description")
+                        or parsed.get(f"button{index}_content")
+                    )
+                    if isinstance(label, str) and isinstance(response, str):
+                        items.append({"label": label, "response": response})
+            if not items:
+                label = parsed.get("label") or parsed.get("text") or parsed.get("name")
+                response = parsed.get("response") or parsed.get("description") or parsed.get("content")
+                if isinstance(label, str) and isinstance(response, str):
+                    items.append({"label": label, "response": response})
+    else:
+        return None
+
+    specs: list[ButtonSpec] = []
+    for item in items:
+        spec = _parse_button_spec_value(item)
+        if spec is None:
+            return None
+        specs.append(spec)
+
+    if len(specs) > MAX_BUTTONS:
+        return None
+    return specs
+
+
+def _parse_buttons_text(text: str) -> list[ButtonSpec] | None:
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        return []
+
+    if "---" in normalized:
+        blocks = [block.strip() for block in normalized.split("---")]
+        specs: list[ButtonSpec] = []
+        for block in blocks:
+            if not block:
+                continue
+            lines = [line.rstrip() for line in block.splitlines() if line.strip()]
+            if len(lines) < 2:
+                return None
+            spec = _normalize_button_spec(lines[0], "\n".join(lines[1:]))
+            if spec is None:
+                return None
+            specs.append(spec)
+        if len(specs) > MAX_BUTTONS:
+            return None
+        return specs
+
+    lines = [line.strip() for line in normalized.splitlines() if line.strip()]
+    if lines and all("|" in line for line in lines):
+        specs = []
+        for line in lines:
+            label, response = line.split("|", 1)
+            spec = _normalize_button_spec(label, response)
+            if spec is None:
+                return None
+            specs.append(spec)
+        if len(specs) > MAX_BUTTONS:
+            return None
+        return specs
+
+    if len(lines) >= 2:
+        spec = _normalize_button_spec(lines[0], "\n".join(lines[1:]))
+        if spec is not None:
+            return [spec]
+
+    return None
+
+
+async def _resolve_buttons_input(
+    buttons_file: discord.Attachment | None,
+) -> tuple[list[ButtonSpec] | None, str | None]:
+    if buttons_file is None:
+        return None, None
+
+    raw_text, error = await _read_attachment_text(buttons_file, kind="Buttons")
+    if error:
+        return None, error
+    if raw_text is None:
+        return None, "Failed to read the buttons file."
+
+    filename = (buttons_file.filename or "").lower()
+    if filename.endswith(".json"):
+        try:
+            parsed = json.loads(raw_text)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None, "Invalid JSON file. Use UTF-8 encoded valid JSON."
+        buttons = _parse_buttons_json(parsed)
+    else:
+        buttons = _parse_buttons_text(raw_text)
+
+    if buttons is None:
+        return None, (
+            "Buttons file must define up to 2 buttons.\n"
+            "Use JSON with a `buttons` array or a text file with blocks separated by `---`."
+        )
+    return buttons, None
+
+
+def _button_view_signature(buttons: list[ButtonSpec]) -> str:
+    payload = json.dumps(
+        [{"label": button.label, "response": button.response} for button in buttons],
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:10]
+
+
 async def _resolve_description_input(
     description: str,
     description_file: discord.Attachment | None,
@@ -80,18 +265,16 @@ async def _resolve_description_input(
     if description_file is None:
         return _preserve_description_structure(description), None
 
-    if description_file.size > 16_000:
-        return None, "Description file is too large. Keep it under 16 KB."
-
-    try:
-        raw = await description_file.read()
-    except discord.HTTPException:
+    raw_text, error = await _read_attachment_text(description_file, kind="Description")
+    if error:
+        return None, error
+    if raw_text is None:
         return None, "Failed to read the description file."
 
     filename = (description_file.filename or "").lower()
     if filename.endswith(".json"):
         try:
-            parsed = json.loads(raw.decode("utf-8-sig"))
+            parsed = json.loads(raw_text)
         except (UnicodeDecodeError, json.JSONDecodeError):
             return None, "Invalid JSON file. Use UTF-8 encoded valid JSON."
 
@@ -108,14 +291,8 @@ async def _resolve_description_input(
         normalized = _preserve_description_structure(desc_value)
         return normalized[:MAX_DESCRIPTION_LEN], None
 
-    for encoding in ("utf-8-sig", "utf-8", "latin-1"):
-        try:
-            text = raw.decode(encoding)
-            normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-            return normalized[:MAX_DESCRIPTION_LEN], None
-        except UnicodeDecodeError:
-            continue
-    return None, "Could not decode the description file. Use a UTF-8 text file."
+    normalized = raw_text.replace("\r\n", "\n").replace("\r", "\n")
+    return normalized[:MAX_DESCRIPTION_LEN], None
 
 
 def _embed_fields_by_index(existing: discord.Embed, idx: int) -> tuple[str | None, str | None]:
@@ -125,9 +302,78 @@ def _embed_fields_by_index(existing: discord.Embed, idx: int) -> tuple[str | Non
     return None, None
 
 
+class EmbedButtonItem(discord.ui.Button):
+    def __init__(self, *, message_id: int, index: int, spec: ButtonSpec, signature: str):
+        super().__init__(
+            label=spec.label,
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"embedbtn:{message_id}:{signature}:{index}",
+        )
+        self.response_text = spec.response
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        embed = discord.Embed(
+            title=self.label or "Button response",
+            description=_trim_text(self.response_text, MAX_BUTTON_DESCRIPTION_LEN),
+            color=0x0B1E3D,
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+class EmbedButtonView(discord.ui.View):
+    def __init__(self, *, message_id: int, button_specs: list[ButtonSpec]):
+        super().__init__(timeout=None)
+        self.message_id = message_id
+        self.button_specs = button_specs
+        self.signature = _button_view_signature(button_specs)
+        for index, spec in enumerate(button_specs, start=1):
+            self.add_item(
+                EmbedButtonItem(
+                    message_id=message_id,
+                    index=index,
+                    spec=spec,
+                    signature=self.signature,
+                )
+            )
+
+
 class EmbedsCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    async def cog_load(self) -> None:
+        try:
+            rows = await self.bot.db.fetch_embed_message_button_rows()
+        except Exception:
+            log.exception("Failed to load persisted embed buttons.")
+            return
+
+        for row in rows:
+            try:
+                message_id = int(row["message_id"])
+                buttons_json = str(row["buttons_json"])
+            except (KeyError, TypeError, ValueError):
+                log.warning("Skipping malformed embed button row: %r", row)
+                continue
+
+            try:
+                parsed = json.loads(buttons_json)
+            except json.JSONDecodeError:
+                log.warning("Skipping invalid button JSON for message %s.", message_id)
+                continue
+
+            button_specs = _parse_buttons_json(parsed)
+            if not button_specs:
+                log.warning("Skipping empty or invalid button spec set for message %s.", message_id)
+                continue
+
+            try:
+                self.bot.add_view(
+                    EmbedButtonView(message_id=message_id, button_specs=button_specs),
+                    message_id=message_id,
+                )
+            except Exception:
+                log.exception("Failed to register persistent buttons for message %s.", message_id)
 
     async def _get_channel_by_id(
         self, guild: discord.Guild, channel_id: int
@@ -167,6 +413,37 @@ class EmbedsCog(commands.Cog):
     def _humanize_http_error(self, error: discord.HTTPException) -> str:
         details = getattr(error, "text", None) or str(error)
         return f"Failed to send the embed. Discord API error ({error.status}): {details}"
+
+    @staticmethod
+    def _serialize_button_specs(button_specs: list[ButtonSpec]) -> str:
+        return json.dumps(
+            [{"label": button.label, "response": button.response} for button in button_specs],
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+    def _make_button_view(self, message_id: int, button_specs: list[ButtonSpec]) -> EmbedButtonView:
+        return EmbedButtonView(message_id=message_id, button_specs=button_specs)
+
+    async def _persist_button_specs_for_message(
+        self,
+        *,
+        message: discord.Message,
+        button_specs: list[ButtonSpec],
+    ) -> None:
+        if message.guild is None:
+            log.warning("Cannot persist button specs for message %s without a guild.", message.id)
+            return
+        await self.bot.db.upsert_embed_message_buttons(
+            message_id=message.id,
+            guild_id=message.guild.id,
+            channel_id=message.channel.id,
+            buttons_json=self._serialize_button_specs(button_specs),
+        )
+
+    async def _clear_button_specs_for_message(self, message_id: int) -> None:
+        await self.bot.db.delete_embed_message_buttons(message_id)
 
     def _build_send_embed(
         self,
@@ -253,6 +530,7 @@ class EmbedsCog(commands.Cog):
         title="Embed title (optional; defaults to current embed title)",
         description="Embed description (optional; defaults to current embed description)",
         description_file="Optional .txt/.json file for description (overrides description text)",
+        buttons_file="Optional .txt/.json file for up to 2 buttons",
         color="Embed color",
         image_url="Main image URL",
         thumbnail_url="Thumbnail image URL",
@@ -285,6 +563,7 @@ class EmbedsCog(commands.Cog):
         title: str | None = None,
         description: str | None = None,
         description_file: discord.Attachment | None = None,
+        buttons_file: discord.Attachment | None = None,
         color: app_commands.Choice[str] | None = None,
         image_url: str | None = None,
         thumbnail_url: str | None = None,
@@ -383,6 +662,11 @@ class EmbedsCog(commands.Cog):
             await interaction.followup.send(description_error, ephemeral=True)
             return
 
+        button_specs, buttons_error = await _resolve_buttons_input(buttons_file)
+        if buttons_error:
+            await interaction.followup.send(buttons_error, ephemeral=True)
+            return
+
         old1n, old1v = _embed_fields_by_index(current, 0)
         old2n, old2v = _embed_fields_by_index(current, 1)
         old3n, old3v = _embed_fields_by_index(current, 2)
@@ -422,7 +706,22 @@ class EmbedsCog(commands.Cog):
         )
 
         try:
-            await message.edit(embed=embed)
+            if buttons_file is not None:
+                if button_specs:
+                    view = self._make_button_view(message.id, button_specs)
+                    await message.edit(embed=embed, view=view)
+                    try:
+                        await self._persist_button_specs_for_message(message=message, button_specs=button_specs)
+                    except Exception:
+                        log.exception("Failed to persist button specs for message %s.", message.id)
+                else:
+                    await message.edit(embed=embed, view=None)
+                    try:
+                        await self._clear_button_specs_for_message(message.id)
+                    except Exception:
+                        log.exception("Failed to clear button specs for message %s.", message.id)
+            else:
+                await message.edit(embed=embed)
         except discord.HTTPException:
             await interaction.followup.send(
                 "Failed to edit that message.",
@@ -439,6 +738,7 @@ class EmbedsCog(commands.Cog):
         title="Embed title",
         description="Embed description",
         description_file="Optional .txt/.json file for description (overrides description text)",
+        buttons_file="Optional .txt/.json file for up to 2 buttons",
         color="Embed color",
         image_url="Main image URL",
         thumbnail_url="Thumbnail image URL",
@@ -472,6 +772,7 @@ class EmbedsCog(commands.Cog):
         title: str,
         description: str | None = None,
         description_file: discord.Attachment | None = None,
+        buttons_file: discord.Attachment | None = None,
         color: app_commands.Choice[str] | None = None,
         image_url: str | None = None,
         thumbnail_url: str | None = None,
@@ -495,14 +796,13 @@ class EmbedsCog(commands.Cog):
                 title="No permission.",
                 description=(
                     "You do NOT have permission to use this command.\n"
-                    "Please open a General Support ticket."
+                    "Please open a Support ticket."
                 ),
                 color=0xD63324,
             )
             no_perm.set_image(
                 url=(
-                    "https://cdn.discordapp.com/attachments/1400844192833474562/"
-                    "1428836300533796904/image.png"
+                    "https://cdn.discordapp.com/attachments/1400844192833474562/1481386750344564798/Complete_Logo_with_letters.png?ex=69be552c&is=69bd03ac&hm=f5a7d2d5b5c8e400739a90df1630031d4953096c722f3a48ced9cbe26abc3773&"
                 )
             )
             if self.bot.config.asset_logo_url:
@@ -547,6 +847,11 @@ class EmbedsCog(commands.Cog):
             (field6_name, field6_value),
         ]
 
+        button_specs, buttons_error = await _resolve_buttons_input(buttons_file)
+        if buttons_error:
+            await interaction.response.send_message(buttons_error, ephemeral=True)
+            return
+
         if description is None and description_file is None:
             await interaction.response.send_modal(
                 SendMessageDescriptionModal(
@@ -559,6 +864,7 @@ class EmbedsCog(commands.Cog):
                     footer_text=footer_text,
                     footer_icon_url=footer_icon_url,
                     fields=fields,
+                    button_specs=button_specs,
                 )
             )
             return
@@ -585,7 +891,22 @@ class EmbedsCog(commands.Cog):
             fields=fields,
         )
         try:
-            await target_channel.send(embed=embed)
+            message = await target_channel.send(embed=embed)
+            if button_specs:
+                view = self._make_button_view(message.id, button_specs)
+                try:
+                    await message.edit(view=view)
+                except discord.HTTPException:
+                    log.exception("Failed to attach buttons to sent embed message %s.", message.id)
+                    await interaction.followup.send(
+                        "Embed sent, but I couldn't attach the buttons.",
+                        ephemeral=True,
+                    )
+                    return
+                try:
+                    await self._persist_button_specs_for_message(message=message, button_specs=button_specs)
+                except Exception:
+                    log.exception("Failed to persist button specs for message %s.", message.id)
         except discord.HTTPException as exc:
             await interaction.followup.send(
                 self._humanize_http_error(exc),
@@ -617,6 +938,7 @@ class SendMessageDescriptionModal(discord.ui.Modal, title="Embed Description"):
         footer_text: str | None,
         footer_icon_url: str | None,
         fields: list[tuple[str | None, str | None]],
+        button_specs: list[ButtonSpec] | None,
     ) -> None:
         super().__init__(timeout=600)
         self.cog = cog
@@ -628,17 +950,20 @@ class SendMessageDescriptionModal(discord.ui.Modal, title="Embed Description"):
         self.footer_text = footer_text
         self.footer_icon_url = footer_icon_url
         self.fields = fields
+        self.button_specs = button_specs or []
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
         if not isinstance(self.target_channel, (discord.TextChannel, discord.ForumChannel)):
-            await interaction.response.send_message("Target channel is no longer valid.", ephemeral=True)
+            await interaction.followup.send("Target channel is no longer valid.", ephemeral=True)
             return
         if interaction.guild is None:
-            await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+            await interaction.followup.send("This command can only be used in a server.", ephemeral=True)
             return
         ok, reason = self.cog._bot_can_send_embeds(interaction.guild, self.target_channel)
         if not ok:
-            await interaction.response.send_message(reason or "Cannot send embed to that channel.", ephemeral=True)
+            await interaction.followup.send(reason or "Cannot send embed to that channel.", ephemeral=True)
             return
         embed = self.cog._build_send_embed(
             title=self.title_text,
@@ -651,11 +976,29 @@ class SendMessageDescriptionModal(discord.ui.Modal, title="Embed Description"):
             fields=self.fields,
         )
         try:
-            await self.target_channel.send(embed=embed)
+            message = await self.target_channel.send(embed=embed)
+            if self.button_specs:
+                view = self.cog._make_button_view(message.id, self.button_specs)
+                try:
+                    await message.edit(view=view)
+                except discord.HTTPException:
+                    log.exception("Failed to attach buttons to sent embed message %s.", message.id)
+                    await interaction.followup.send(
+                        "Embed sent, but I couldn't attach the buttons.",
+                        ephemeral=True,
+                    )
+                    return
+                try:
+                    await self.cog._persist_button_specs_for_message(
+                        message=message,
+                        button_specs=self.button_specs,
+                    )
+                except Exception:
+                    log.exception("Failed to persist button specs for message %s.", message.id)
         except discord.HTTPException as exc:
-            await interaction.response.send_message(self.cog._humanize_http_error(exc), ephemeral=True)
+            await interaction.followup.send(self.cog._humanize_http_error(exc), ephemeral=True)
             return
-        await interaction.response.send_message("Embed sent.", ephemeral=True)
+        await interaction.followup.send("Embed sent.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

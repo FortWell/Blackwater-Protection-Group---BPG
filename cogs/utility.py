@@ -9,7 +9,7 @@ import psutil
 from discord import app_commands
 from discord.ext import commands
 
-LOCKDOWN_ROLE_ID = 1471151522657079306
+LOCKDOWN_ROLE_ID = 1400844188840497171
 OPORATION_BLITZ_ROLE_ID = 1478860250869399733
 OPORATION_BLITZ_WEBHOOK_URL = (
     "https://discord.com/api/webhooks/1479825942166769725/"

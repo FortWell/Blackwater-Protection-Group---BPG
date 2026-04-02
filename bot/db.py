@@ -52,6 +52,17 @@ class Database:
         )
         await self.conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS embed_message_buttons (
+                message_id INTEGER PRIMARY KEY,
+                guild_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL,
+                buttons_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        await self.conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS application_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id INTEGER NOT NULL,
@@ -145,6 +156,48 @@ class Database:
             (key, value),
         )
         await self.conn.commit()
+
+    async def upsert_embed_message_buttons(
+        self,
+        *,
+        message_id: int,
+        guild_id: int,
+        channel_id: int,
+        buttons_json: str,
+    ) -> None:
+        if self.conn is None:
+            raise RuntimeError("Database not initialized.")
+        await self.conn.execute(
+            """
+            INSERT INTO embed_message_buttons (message_id, guild_id, channel_id, buttons_json)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(message_id) DO UPDATE SET
+                guild_id = excluded.guild_id,
+                channel_id = excluded.channel_id,
+                buttons_json = excluded.buttons_json,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (message_id, guild_id, channel_id, buttons_json),
+        )
+        await self.conn.commit()
+
+    async def delete_embed_message_buttons(self, message_id: int) -> None:
+        if self.conn is None:
+            raise RuntimeError("Database not initialized.")
+        await self.conn.execute(
+            "DELETE FROM embed_message_buttons WHERE message_id = ?",
+            (message_id,),
+        )
+        await self.conn.commit()
+
+    async def fetch_embed_message_button_rows(self) -> list[aiosqlite.Row]:
+        return await self.fetch_rows(
+            """
+            SELECT message_id, guild_id, channel_id, buttons_json
+            FROM embed_message_buttons
+            ORDER BY message_id
+            """
+        )
 
     async def close(self) -> None:
         if self.conn is not None:

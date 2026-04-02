@@ -27,8 +27,6 @@ PROMOTION_THUMBNAIL_URL = (
 )
 CENTRAL_REQUIRED_ROLE_ID = 1477331892448526456
 CENTRAL_TARGET_CHANNEL_ID = 1477320169914372168
-FPS_COMMAND_ROLE_ID = 1479214803708022945
-BAOD_COMMAND_ROLE_ID = 1479215347986075859
 
 
 class StaffCog(commands.Cog):
@@ -47,16 +45,6 @@ class StaffCog(commands.Cog):
             return False
         member_role_ids = {role.id for role in interaction.user.roles}
         return bool(member_role_ids.intersection(allowed_ids))
-
-    def _can_use_fps_commands(self, interaction: discord.Interaction) -> bool:
-        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
-            return False
-        return bool(interaction.user.get_role(FPS_COMMAND_ROLE_ID))
-
-    def _can_use_baod_commands(self, interaction: discord.Interaction) -> bool:
-        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
-            return False
-        return bool(interaction.user.get_role(BAOD_COMMAND_ROLE_ID))
 
     async def _resolve_member(
         self,
@@ -269,152 +257,13 @@ class StaffCog(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(name="baod-promotion", description="BAOD promotion command.")
+    @app_commands.command(name="promote", description="Central promotion command.")
     @app_commands.describe(
         user="User to promote",
         new_rank="New rank role to assign",
         reason="Reason for promotion",
     )
-    async def baod_promotion(
-        self,
-        interaction: discord.Interaction,
-        user: discord.Member,
-        new_rank: discord.Role,
-        reason: str = ".",
-    ) -> None:
-        if not self._can_use_baod_commands(interaction):
-            await interaction.response.send_message(
-                f"Only <@&{BAOD_COMMAND_ROLE_ID}> can use this command.",
-                ephemeral=True,
-            )
-            return
-        await self._run_promotion(
-            interaction,
-            user,
-            new_rank,
-            reason,
-            panel_title="Staff Promotion",
-            panel_desc=(
-                "The High Ranking Team has noticed your contributions towards the Federal Reserve\n"
-                "You've been issued a promotion. Congratulations!"
-            ),
-            channel_id=self.bot.config.staff_promotion_channel_id,
-            require_manage_permission=False,
-        )
-
-    @app_commands.command(name="baod-infraction", description="BAOD infraction command.")
-    @app_commands.describe(
-        user="User receiving the infraction",
-        punishment="Punishment type",
-        reason="Reason/details",
-    )
-    @app_commands.choices(
-        punishment=[app_commands.Choice(name=label, value=value) for (label, value) in PUNISHMENTS]
-    )
-    async def baod_infraction(
-        self,
-        interaction: discord.Interaction,
-        user: discord.Member,
-        punishment: app_commands.Choice[str],
-        reason: str = "No reason provided.",
-    ) -> None:
-        if not self._can_use_baod_commands(interaction):
-            await interaction.response.send_message(
-                f"Only <@&{BAOD_COMMAND_ROLE_ID}> can use this command.",
-                ephemeral=True,
-            )
-            return
-        await self._run_infraction(
-            interaction,
-            user,
-            punishment,
-            reason,
-            panel_title="Staff Infraction",
-            panel_desc=(
-                "The High Ranking Team at The Federal Reserve has noticed that you've\n"
-                "violated our policies. We will be taking actions upon your account. Arguing\n"
-                "about your recent infraction will result in another strike."
-            ),
-            channel_id=self.bot.config.staff_infraction_channel_id,
-            require_manage_permission=False,
-        )
-
-    @app_commands.command(name="fps-promotion", description="FPS promotion command.")
-    @app_commands.describe(
-        user="User to promote",
-        new_rank="New rank role to assign",
-        reason="Reason for promotion",
-    )
-    async def fps_promotion(
-        self,
-        interaction: discord.Interaction,
-        user: discord.Member,
-        new_rank: discord.Role,
-        reason: str = ".",
-    ) -> None:
-        if not self._can_use_fps_commands(interaction):
-            await interaction.response.send_message(
-                f"Only <@&{FPS_COMMAND_ROLE_ID}> can use this command.",
-                ephemeral=True,
-            )
-            return
-        await self._run_promotion(
-            interaction,
-            user,
-            new_rank,
-            reason,
-            panel_title="FPS Promotion",
-            panel_desc=(
-                "The Federal Protective Service leadership has reviewed your contributions.\n"
-                "You have been issued a promotion. Congratulations!"
-            ),
-            channel_id=self.bot.config.fps_promotion_channel_id or self.bot.config.staff_promotion_channel_id,
-            require_manage_permission=False,
-        )
-
-    @app_commands.command(name="fps-infraction", description="FPS infraction command.")
-    @app_commands.describe(
-        user="User receiving the infraction",
-        punishment="Punishment type",
-        reason="Reason/details",
-    )
-    @app_commands.choices(
-        punishment=[app_commands.Choice(name=label, value=value) for (label, value) in PUNISHMENTS]
-    )
-    async def fps_infraction(
-        self,
-        interaction: discord.Interaction,
-        user: discord.Member,
-        punishment: app_commands.Choice[str],
-        reason: str = "No reason provided.",
-    ) -> None:
-        if not self._can_use_fps_commands(interaction):
-            await interaction.response.send_message(
-                f"Only <@&{FPS_COMMAND_ROLE_ID}> can use this command.",
-                ephemeral=True,
-            )
-            return
-        await self._run_infraction(
-            interaction,
-            user,
-            punishment,
-            reason,
-            panel_title="FPS Infraction",
-            panel_desc=(
-                "The Federal Protective Service leadership has identified a policy violation.\n"
-                "Actions are being taken on your account. Repeated violations may escalate penalties."
-            ),
-            channel_id=self.bot.config.fps_infraction_channel_id or self.bot.config.staff_infraction_channel_id,
-            require_manage_permission=False,
-        )
-
-    @app_commands.command(name="cetral-promote", description="Central promotion command.")
-    @app_commands.describe(
-        user="User to promote",
-        new_rank="New rank role to assign",
-        reason="Reason for promotion",
-    )
-    async def cetral_promote(
+    async def promote(
         self,
         interaction: discord.Interaction,
         user: discord.Member,
@@ -441,7 +290,7 @@ class StaffCog(commands.Cog):
             require_manage_permission=False,
         )
 
-    @app_commands.command(name="central-infractionsm", description="Central infraction command.")
+    @app_commands.command(name="infract", description="Central infraction command.")
     @app_commands.describe(
         user="User receiving the infraction",
         punishment="Punishment type",
@@ -450,7 +299,7 @@ class StaffCog(commands.Cog):
     @app_commands.choices(
         punishment=[app_commands.Choice(name=label, value=value) for (label, value) in PUNISHMENTS]
     )
-    async def central_infractionsm(
+    async def infract(
         self,
         interaction: discord.Interaction,
         user: discord.Member,

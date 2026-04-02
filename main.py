@@ -23,7 +23,7 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 log = logging.getLogger("nycrpp-bot")
-BOT_LOCKDOWN_ROLE_ID = 1471151522657079306
+BOT_LOCKDOWN_ROLE_ID = 1400844188840497171
 
 
 class NYCRPPCommandTree(app_commands.CommandTree):

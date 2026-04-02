@@ -12,6 +12,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.embed_utils import apply_embed_template
 APPLICATION_REVIEW_ROLE_ID = 1478727168887623791
 LEGACY_ACCEPT_DENY_LOCK_ROLE_ID = 1477383882973249616
 APPLICATION_BLACKLIST_ROLE_ID = 1479234689955926058
@@ -416,6 +417,16 @@ class ApplicationsCog(commands.Cog):
         if detail:
             embed.add_field(name="Detail", value=detail[:1000], inline=False)
         embed.set_footer(text="Federal Reserve Management", icon_url=APPLICATION_LOGO_URL)
+        apply_embed_template(
+            embed,
+            self.bot.config.embed_templates.get("app_ai_error"),
+            context={
+                "provider": provider,
+                "status": status_code if status_code is not None else "N/A",
+                "detail": detail,
+                "message": message,
+            },
+        )
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
                 webhook = discord.Webhook.from_url(webhook_url, session=session)
@@ -660,6 +671,66 @@ class ApplicationsCog(commands.Cog):
             ),
         ]
 
+    def _application_flow_items(self) -> list[tuple[str, str]]:
+        # kind: "info" means send text only, "question" means wait for an answer.
+        return [
+            (
+                "info",
+                "**Blackwater Protection Group - Personnel Application**\n\n"
+                "Thank you for your interest in joining Blackwater Protection Group.\n"
+                "Our organization focuses on professionalism, discipline, and tactical excellence. "
+                "We expect all applicants to answer honestly and with effort. "
+                "Low-effort or troll applications may be automatically denied.\n\n"
+                "Please answer all questions clearly.",
+            ),
+            ("info", "**Section 1 - Applicant Information**"),
+            ("question", "1. Full Name / Username:"),
+            ("question", "2. Discord Username & Tag:"),
+            ("question", "3. Age:"),
+            ("question", "4. Time Zone:"),
+            ("question", "5. Country:"),
+            ("question", "6. Do you have a working microphone for communication during operations? (Yes/No)"),
+            ("info", "**Section 2 - Activity & Availability**"),
+            ("question", "7. How active are you? (Provide hours per day and hours per week)"),
+            ("question", "8. What days are you typically available for operations, trainings, and meetings?"),
+            ("question", "9. Are you able to attend mandatory trainings or scheduled operations consistently?"),
+            ("info", "**Section 3 - Experience & Background**"),
+            (
+                "question",
+                "10. Do you have previous experience in security, law enforcement, military, or tactical groups (in-game or real life)? If yes, explain.",
+            ),
+            ("question", "11. Have you ever worked in a protection or escort team before? Explain your role if applicable."),
+            ("question", "12. Have you ever been removed, blacklisted, or disciplined from a group before? If yes, explain honestly."),
+            ("info", "**Section 4 - Tactical Knowledge**"),
+            ("question", "13. What do you believe are the main responsibilities of a protection agent?"),
+            ("question", "14. What are the most important qualities a member of a protection team should have?"),
+            ("question", "15. Why is communication important during tactical operations?"),
+            ("info", "**Section 5 - Scenario Questions**"),
+            (
+                "question",
+                "16. You are assigned to protect a VIP during transport. A suspicious vehicle begins following the convoy. What actions would you take?",
+            ),
+            ("question", "17. During an operation, your team leader gives an order you personally disagree with. How do you respond?"),
+            ("question", "18. A civilian enters a restricted area that your team is securing. What do you do?"),
+            ("question", "19. You notice a teammate ignoring protocol during an operation. How do you handle the situation?"),
+            ("info", "**Section 6 - Professionalism**"),
+            ("question", "20. What does professionalism mean to you in a security organization?"),
+            ("question", "21. Why do you want to join Blackwater Protection Group?"),
+            ("question", "22. What skills or qualities would you bring to the team?"),
+            ("info", "**Final Agreement**"),
+            (
+                "info",
+                "By submitting this application, you confirm that all answers are truthful.\n"
+                "False information may result in removal from the organization.",
+            ),
+            (
+                "info",
+                "**Notice:**\n"
+                "Once submitted, Command will review your application.\n"
+                "Do not DM staff members regarding your status.",
+            ),
+        ]
+
     def _ai_hold_embed(self) -> discord.Embed:
         embed = discord.Embed(
             title="\U0001F7E8Please Hold!",
@@ -673,6 +744,10 @@ class ApplicationsCog(commands.Cog):
         embed.set_thumbnail(url=AI_TEST_LOGO_URL)
         embed.set_image(url=AI_TEST_IMAGE_URL)
         embed.set_footer(text="Federal Reserve Management", icon_url=AI_TEST_LOGO_URL)
+        apply_embed_template(
+            embed,
+            self.bot.config.embed_templates.get("app_ai_hold"),
+        )
         return embed
 
     def _ai_completed_embed(self) -> discord.Embed:
@@ -688,6 +763,10 @@ class ApplicationsCog(commands.Cog):
         embed.set_thumbnail(url=AI_TEST_LOGO_URL)
         embed.set_image(url=AI_TEST_IMAGE_URL)
         embed.set_footer(text="Federal Reserve Management", icon_url=AI_TEST_LOGO_URL)
+        apply_embed_template(
+            embed,
+            self.bot.config.embed_templates.get("app_ai_completed"),
+        )
         return embed
 
     def _ai_warning_embed(self, strikes: int) -> discord.Embed:
@@ -704,6 +783,14 @@ class ApplicationsCog(commands.Cog):
         embed.set_thumbnail(url=AI_TEST_LOGO_URL)
         embed.set_image(url=AI_TEST_IMAGE_URL)
         embed.set_footer(text="Federal Reserve Management", icon_url=AI_TEST_LOGO_URL)
+        apply_embed_template(
+            embed,
+            self.bot.config.embed_templates.get("app_ai_warning"),
+            context={
+                "strikes": strikes,
+                "max_strikes": MAX_AI_WARNING_STRIKES,
+            },
+        )
         return embed
 
     async def _find_existing_application_channel(
@@ -848,6 +935,14 @@ class ApplicationsCog(commands.Cog):
         embed.set_thumbnail(url=APPLICATION_LOGO_URL)
         embed.set_image(url=ACCEPT_BANNER_URL)
         embed.set_footer(text="Federal Reserve Management", icon_url=APPLICATION_LOGO_URL)
+        apply_embed_template(
+            embed,
+            self.bot.config.embed_templates.get("app_canceled"),
+            context={
+                "applicant": applicant.mention,
+                "applicant_id": applicant.id,
+            },
+        )
         transcript_file = discord.File(
             fp=io.BytesIO(transcript_text.encode("utf-8", errors="replace")),
             filename=f"application-canceled-{log_channel.id}.txt",
@@ -920,6 +1015,16 @@ class ApplicationsCog(commands.Cog):
             color=0xB32020,
         )
         embed.set_footer(text="Federal Reserve Management", icon_url=AI_TEST_LOGO_URL)
+        apply_embed_template(
+            embed,
+            self.bot.config.embed_templates.get("app_closed_strike"),
+            context={
+                "applicant": applicant.mention,
+                "applicant_id": applicant.id,
+                "strikes": strikes,
+                "max_strikes": MAX_AI_WARNING_STRIKES,
+            },
+        )
         await channel.send(content=f"<@&{APPLICATION_REVIEW_ROLE_ID}>", embed=embed)
 
     async def _send_application_decision_embed(
@@ -936,10 +1041,15 @@ class ApplicationsCog(commands.Cog):
         if interaction.guild is None:
             return False
 
-        target_channel = interaction.guild.get_channel(APPLICATION_RESULTS_CHANNEL_ID)
+        template = self.bot.config.embed_templates.get("app_results")
+        template_channel_id = 0
+        if template:
+            template_channel_id = int(template.get("channel_id") or 0)
+        target_channel_id = template_channel_id or APPLICATION_RESULTS_CHANNEL_ID
+        target_channel = interaction.guild.get_channel(target_channel_id)
         if not isinstance(target_channel, discord.TextChannel):
             try:
-                fetched = await interaction.guild.fetch_channel(APPLICATION_RESULTS_CHANNEL_ID)
+                fetched = await interaction.guild.fetch_channel(target_channel_id)
             except discord.HTTPException:
                 return False
             if not isinstance(fetched, discord.TextChannel):
@@ -969,6 +1079,20 @@ class ApplicationsCog(commands.Cog):
         embed.set_image(url=ACCEPT_BANNER_URL)
         embed.set_thumbnail(url=APPLICATION_LOGO_URL)
         embed.set_footer(text="Federal Reserve Management", icon_url=APPLICATION_LOGO_URL)
+        apply_embed_template(
+            embed,
+            template,
+            context={
+                "user": user.mention,
+                "user_id": user.id,
+                "reason": reason,
+                "notes": notes,
+                "status": status,
+                "moderator": moderator_text,
+                "verdict_line": verdict_line,
+                "body": body,
+            },
+        )
         await target_channel.send(content=user.mention, embed=embed)
         return True
 
@@ -1020,6 +1144,18 @@ class ApplicationsCog(commands.Cog):
         embed.set_thumbnail(url=APPLICATION_LOGO_URL)
         embed.set_image(url=ACCEPT_BANNER_URL)
         embed.set_footer(text="Federal Reserve Management", icon_url=APPLICATION_LOGO_URL)
+        apply_embed_template(
+            embed,
+            self.bot.config.embed_templates.get("app_review_submitted"),
+            context={
+                "applicant": applicant.mention,
+                "applicant_id": applicant.id,
+                "status": status,
+                "strikes": strike_count,
+                "max_strikes": MAX_AI_WARNING_STRIKES,
+                "log_channel": log_channel.mention,
+            },
+        )
 
         transcript_bytes = transcript_text.encode("utf-8", errors="replace")
         transcript_file = discord.File(
@@ -1452,6 +1588,13 @@ class ApplicationsCog(commands.Cog):
                 ephemeral=True,
             )
             return
+        await self._store_application_decision(
+            guild_id=interaction.guild.id,
+            user=user,
+            status=status.value,
+            notes=notes,
+        )
+        await self._mark_session_decided(user.id, interaction.channel_id, status.value)
         await interaction.followup.send("Application decision posted.", ephemeral=True)
 
     @app_commands.command(name="deny", description="Deny or accept an application with professional review output.")
@@ -1497,6 +1640,13 @@ class ApplicationsCog(commands.Cog):
                 ephemeral=True,
             )
             return
+        await self._store_application_decision(
+            guild_id=interaction.guild.id,
+            user=user,
+            status=status.value,
+            notes=notes,
+        )
+        await self._mark_session_decided(user.id, interaction.channel_id, status.value)
         await interaction.followup.send("Application decision posted.", ephemeral=True)
 
     @app_commands.command(name="search-applicant", description="Search saved applicant decisions.")
@@ -1561,6 +1711,14 @@ class ApplicationsCog(commands.Cog):
         )
         embed.set_thumbnail(url=APPLICATION_LOGO_URL)
         embed.set_footer(text="Federal Reserve Management", icon_url=APPLICATION_LOGO_URL)
+        apply_embed_template(
+            embed,
+            self.bot.config.embed_templates.get("app_search_results"),
+            context={
+                "query": query_name,
+                "discord_id": search_id or "",
+            },
+        )
         if not rows:
             embed.add_field(name="Result", value="No records found.", inline=False)
         else:
@@ -1587,4 +1745,3 @@ class ApplicationsCog(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(ApplicationsCog(bot))
-
