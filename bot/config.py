@@ -189,7 +189,7 @@ class BotConfig:
         questions = [q.strip() for q in raw_questions.split("||") if q.strip()]
         if not questions:
             questions = [
-                "Why do you want to join NYCRPP staff?",
+                "Why do you want to join Blackwater Protection Group staff?",
                 "How would you handle a difficult player situation?",
                 "What timezone and hours can you be active?",
             ]

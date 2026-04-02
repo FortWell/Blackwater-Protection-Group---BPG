@@ -184,7 +184,7 @@ def _ticket_info_embed(
         ),
         inline=False,
     )
-    embed.set_footer(text="Powered by Federal Reserve Management", icon_url=FOOTER_ICON_URL)
+    embed.set_footer(text="Powered by Blackwater Protection Group", icon_url=FOOTER_ICON_URL)
     apply_embed_template(
         embed,
         cfg.embed_templates.get("ticket_info"),
@@ -204,7 +204,7 @@ def _ticket_reason_embed(cfg, reason: str) -> discord.Embed:
         description=reason,
         color=0x2B2D31,
     )
-    embed.set_footer(text="Powered by Federal Reserve Management", icon_url=FOOTER_ICON_URL)
+    embed.set_footer(text="Powered by Blackwater Protection Group", icon_url=FOOTER_ICON_URL)
     apply_embed_template(
         embed,
         cfg.embed_templates.get("ticket_reason"),
@@ -284,7 +284,7 @@ def _message_to_text_line(msg: discord.Message) -> str:
 
 async def _build_transcript_text(channel: discord.TextChannel) -> str:
     header = [
-        "NYCRPP Ticket Transcript",
+        "Blackwater Protection Group Ticket Transcript",
         f"Guild: {channel.guild.name} ({channel.guild.id})",
         f"Channel: #{channel.name} ({channel.id})",
         f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",

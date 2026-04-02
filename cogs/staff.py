@@ -187,7 +187,7 @@ class StaffCog(commands.Cog):
         embed.add_field(name="Reason:", value=reason or ".", inline=True)
         embed.set_thumbnail(url=PROMOTION_THUMBNAIL_URL)
         embed.set_image(url=PROMOTION_BANNER_URL)
-        embed.set_footer(text="Federal Reserve Management", icon_url=PROMOTION_THUMBNAIL_URL)
+        embed.set_footer(text="Blackwater Protection Group", icon_url=PROMOTION_THUMBNAIL_URL)
 
         await self._publish_panel(
             interaction,
@@ -245,7 +245,7 @@ class StaffCog(commands.Cog):
         embed.add_field(name="Reason:", value=reason or ".", inline=True)
         embed.set_thumbnail(url=PROMOTION_THUMBNAIL_URL)
         embed.set_image(url=PROMOTION_BANNER_URL)
-        embed.set_footer(text="Federal Reserve Management", icon_url=PROMOTION_THUMBNAIL_URL)
+        embed.set_footer(text="Blackwater Protection Group", icon_url=PROMOTION_THUMBNAIL_URL)
         await self._publish_panel(
             interaction,
             embed,

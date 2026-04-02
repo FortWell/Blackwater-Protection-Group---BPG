@@ -416,7 +416,7 @@ class ApplicationsCog(commands.Cog):
         embed.add_field(name="Status", value=str(status_code) if status_code is not None else "N/A", inline=True)
         if detail:
             embed.add_field(name="Detail", value=detail[:1000], inline=False)
-        embed.set_footer(text="Federal Reserve Management", icon_url=APPLICATION_LOGO_URL)
+        embed.set_footer(text="Blackwater Protection Group", icon_url=APPLICATION_LOGO_URL)
         apply_embed_template(
             embed,
             self.bot.config.embed_templates.get("app_ai_error"),
@@ -631,8 +631,8 @@ class ApplicationsCog(commands.Cog):
         return [
             (
                 "info",
-                "Thank you for your interest in joining the Federal Reserve.\n"
-                "The Federal Reserve represents professionalism, structure, and responsibility.\n"
+                "Thank you for your interest in joining Blackwater Protection Group.\n"
+                "Blackwater Protection Group represents professionalism, structure, and responsibility.\n"
                 "Answer all questions clearly and honestly. Low-effort or troll applications will be denied.",
             ),
             ("info", "**Applicant Information**"),
@@ -642,32 +642,32 @@ class ApplicationsCog(commands.Cog):
             ("question", "4. 🎙️ Do you have a working microphone? (Yes/No)"),
             ("info", "**Availability & Commitment**"),
             ("question", "5. ⏰ How active are you? (Hours per day and per week)"),
-            ("question", "6. 📆 Are you able to attend scheduled trainings, meetings, and Federal events consistently?"),
-            ("question", "7. 📚 Are you familiar with the purpose and responsibilities of the Federal Reserve within the game? Explain your understanding."),
+            ("question", "6. 📆 Are you able to attend scheduled trainings, meetings, and Blackwater Protection Group events consistently?"),
+            ("question", "7. 📚 Are you familiar with the purpose and responsibilities of Blackwater Protection Group within the game? Explain your understanding."),
             ("info", "**Knowledge & Responsibility**"),
-            ("question", "8. 🏛️ What do you believe is the primary mission of the Federal Reserve?"),
-            ("question", "9. 📖 Why is professionalism important when representing a federal institution?"),
-            ("question", "10. 🔐 How would you handle sensitive or confidential information within the Federal Reserve?"),
+            ("question", "8. 🏛️ What do you believe is the primary mission of Blackwater Protection Group?"),
+            ("question", "9. 📖 Why is professionalism important when representing the organization?"),
+            ("question", "10. 🔐 How would you handle sensitive or confidential information within Blackwater Protection Group?"),
             ("info", "**Situational Questions**"),
-            ("question", "11. ⚖️ A staff member is being disrespectful during a formal Federal event. What would you do?"),
+            ("question", "11. ⚖️ A staff member is being disrespectful during a formal Blackwater Protection Group event. What would you do?"),
             ("question", "12. 🧠 You are given an instruction by a superior that you disagree with but it follows policy. How do you respond?"),
-            ("question", "13. 🕯️ A civilian is confused about Federal procedures and begins complaining publicly. How do you handle it?"),
+            ("question", "13. 🕯️ A civilian is confused about Blackwater Protection Group procedures and begins complaining publicly. How do you handle it?"),
             ("question", "14. 🤝 Two members are arguing during an operation. What steps would you take to resolve the conflict?"),
             ("info", "**Motivation & Character**"),
-            ("question", "15. 🎯 Why do you want to join the Federal Reserve?"),
+            ("question", "15. 🎯 Why do you want to join Blackwater Protection Group?"),
             ("question", "16. 💼 What skills or strengths do you bring to this position?"),
             ("question", "17. 📈 How do you handle constructive criticism?"),
             ("question", "18. 🧠 Describe a time you showed leadership or responsibility."),
-            ("question", "19. 🕴️ How would you represent the Federal Reserve both in-game and in the community?"),
+            ("question", "19. 🕴️ How would you represent Blackwater Protection Group both in-game and in the community?"),
             ("info", "**Final Agreement**"),
             ("question", "20. Do you understand that misuse of authority, corruption, or unprofessional conduct may result in removal? (Yes/No)"),
             ("question", "21. Do you agree to follow the chain of command and maintain integrity at all times? (Yes/No)"),
             (
                 "info",
                 "📌 **Notice:**\n"
-                "Once submitted, Federal Command will review your application.\n"
+                "Once submitted, Blackwater Protection Group Command will review your application.\n"
                 "Do not DM staff members regarding your status.\n\n"
-                "Federal Reserve • Personnel Division.",
+                "Blackwater Protection Group • Personnel Division.",
             ),
         ]
 
@@ -743,7 +743,7 @@ class ApplicationsCog(commands.Cog):
         embed.set_author(name="Artificial Intelligence Test")
         embed.set_thumbnail(url=AI_TEST_LOGO_URL)
         embed.set_image(url=AI_TEST_IMAGE_URL)
-        embed.set_footer(text="Federal Reserve Management", icon_url=AI_TEST_LOGO_URL)
+        embed.set_footer(text="Blackwater Protection Group", icon_url=AI_TEST_LOGO_URL)
         apply_embed_template(
             embed,
             self.bot.config.embed_templates.get("app_ai_hold"),
@@ -762,7 +762,7 @@ class ApplicationsCog(commands.Cog):
         embed.set_author(name="Artificial Intelligence Test _ COMPLETED")
         embed.set_thumbnail(url=AI_TEST_LOGO_URL)
         embed.set_image(url=AI_TEST_IMAGE_URL)
-        embed.set_footer(text="Federal Reserve Management", icon_url=AI_TEST_LOGO_URL)
+        embed.set_footer(text="Blackwater Protection Group", icon_url=AI_TEST_LOGO_URL)
         apply_embed_template(
             embed,
             self.bot.config.embed_templates.get("app_ai_completed"),
@@ -782,7 +782,7 @@ class ApplicationsCog(commands.Cog):
         embed.set_author(name="Artificial Intelligence Test _ WARNING")
         embed.set_thumbnail(url=AI_TEST_LOGO_URL)
         embed.set_image(url=AI_TEST_IMAGE_URL)
-        embed.set_footer(text="Federal Reserve Management", icon_url=AI_TEST_LOGO_URL)
+        embed.set_footer(text="Blackwater Protection Group", icon_url=AI_TEST_LOGO_URL)
         apply_embed_template(
             embed,
             self.bot.config.embed_templates.get("app_ai_warning"),
@@ -908,7 +908,7 @@ class ApplicationsCog(commands.Cog):
 
     async def _build_application_transcript(self, channel: discord.TextChannel) -> str:
         lines = [
-            "NYCRPP Application Transcript",
+            "Blackwater Protection Group Application Transcript",
             f"Guild: {channel.guild.name} ({channel.guild.id})",
             f"Channel: #{channel.name} ({channel.id})",
             "-" * 72,
@@ -934,7 +934,7 @@ class ApplicationsCog(commands.Cog):
         )
         embed.set_thumbnail(url=APPLICATION_LOGO_URL)
         embed.set_image(url=ACCEPT_BANNER_URL)
-        embed.set_footer(text="Federal Reserve Management", icon_url=APPLICATION_LOGO_URL)
+        embed.set_footer(text="Blackwater Protection Group", icon_url=APPLICATION_LOGO_URL)
         apply_embed_template(
             embed,
             self.bot.config.embed_templates.get("app_canceled"),
@@ -1014,7 +1014,7 @@ class ApplicationsCog(commands.Cog):
             ),
             color=0xB32020,
         )
-        embed.set_footer(text="Federal Reserve Management", icon_url=AI_TEST_LOGO_URL)
+        embed.set_footer(text="Blackwater Protection Group", icon_url=AI_TEST_LOGO_URL)
         apply_embed_template(
             embed,
             self.bot.config.embed_templates.get("app_closed_strike"),
@@ -1078,7 +1078,7 @@ class ApplicationsCog(commands.Cog):
         embed = discord.Embed(title="Application Results", description=body, color=color)
         embed.set_image(url=ACCEPT_BANNER_URL)
         embed.set_thumbnail(url=APPLICATION_LOGO_URL)
-        embed.set_footer(text="Federal Reserve Management", icon_url=APPLICATION_LOGO_URL)
+        embed.set_footer(text="Blackwater Protection Group", icon_url=APPLICATION_LOGO_URL)
         apply_embed_template(
             embed,
             template,
@@ -1143,7 +1143,7 @@ class ApplicationsCog(commands.Cog):
             embed.add_field(name=f"Q{idx}: {q}", value=value, inline=False)
         embed.set_thumbnail(url=APPLICATION_LOGO_URL)
         embed.set_image(url=ACCEPT_BANNER_URL)
-        embed.set_footer(text="Federal Reserve Management", icon_url=APPLICATION_LOGO_URL)
+        embed.set_footer(text="Blackwater Protection Group", icon_url=APPLICATION_LOGO_URL)
         apply_embed_template(
             embed,
             self.bot.config.embed_templates.get("app_review_submitted"),
@@ -1285,7 +1285,7 @@ class ApplicationsCog(commands.Cog):
             questions = [text for (kind, text) in flow_items if kind == "question"]
             answers: list[dict[str, str | float]] = []
             transcript_lines: list[str] = [
-                "NYCRPP Application Transcript",
+                "Blackwater Protection Group Application Transcript",
                 f"Guild: {guild.name} ({guild.id})",
                 f"Applicant: {user} ({user.id})",
                 f"Started: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
@@ -1710,7 +1710,7 @@ class ApplicationsCog(commands.Cog):
             ),
         )
         embed.set_thumbnail(url=APPLICATION_LOGO_URL)
-        embed.set_footer(text="Federal Reserve Management", icon_url=APPLICATION_LOGO_URL)
+        embed.set_footer(text="Blackwater Protection Group", icon_url=APPLICATION_LOGO_URL)
         apply_embed_template(
             embed,
             self.bot.config.embed_templates.get("app_search_results"),

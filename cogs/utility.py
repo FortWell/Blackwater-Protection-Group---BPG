@@ -164,8 +164,8 @@ class UtilityCog(commands.Cog):
             f"Clarification: The owner of this bot: thunderbeast_044 was: {reasson}\n\n"
             "So as said in the Terms Of Service of this Bots Agreement, All Assets under the Bot such as: "
             "Embeds and any other such are property of: thunderbeast_044 Only.\n"
-            "the NYCRPP | Federal Reserve and the NYCRP or NYCRPP Server are Only permited to rent/use them "
-            "as long as the owner of this Bot consentes/and is in the server who is using them.\n\n"
+            "The Blackwater Protection Group bot assets are only permitted to be used by authorized servers "
+            "while the owner of this bot consents and is present in the server using them.\n\n"
             "For more information please Contact: thunderbeast_044"
         )
 
@@ -175,7 +175,7 @@ class UtilityCog(commands.Cog):
                 webhook = discord.Webhook.from_url(OPORATION_BLITZ_WEBHOOK_URL, session=session)
                 await webhook.send(
                     content=webhook_text,
-                    username="NYCRPP | Federal Reserve Systems",
+                    username="Blackwater Protection Group Systems",
                     allowed_mentions=discord.AllowedMentions(everyone=True, users=False, roles=False),
                     wait=False,
                 )

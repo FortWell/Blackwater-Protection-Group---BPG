@@ -22,11 +22,11 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
-log = logging.getLogger("Blackwater Protection Group")
-BOT_LOCKDOWN_ROLE_ID =1400844188840497171
+log = logging.getLogger("bpg-bot")
+BOT_LOCKDOWN_ROLE_ID = 1400844188840497171
 
 
-class NYCRPPCommandTree(app_commands.CommandTree):
+class BPGCommandTree(app_commands.CommandTree):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         checker = getattr(self.client, "is_command_allowed_in_lockdown", None)
         if checker is None:
@@ -39,7 +39,7 @@ def _acquire_single_instance_lock() -> int | None:
     if os.name != "nt":
         return None
     # Use Local namespace to avoid cross-session/global collisions.
-    mutex_name = "Local\\NYCRPP_Federal_Reserve_Bot_MainPy"
+    mutex_name = "Local\\BPG_Blackwater_Protection_Group_MainPy"
     handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
     if not handle:
         return None
@@ -50,12 +50,12 @@ def _acquire_single_instance_lock() -> int | None:
     return handle
 
 
-class NYCRPPBot(commands.Bot):
+class BPGBot(commands.Bot):
     def __init__(self, config: BotConfig):
         intents = discord.Intents.default()
         intents.members = config.enable_members_intent
         intents.message_content = config.enable_message_content_intent
-        super().__init__(command_prefix="!", intents=intents, tree_cls=NYCRPPCommandTree)
+        super().__init__(command_prefix="!", intents=intents, tree_cls=BPGCommandTree)
         self.config = config
         self.db = Database(config.database_path)
         self.audit = AuditLogger(config.bot_audit_webhook_url)
@@ -231,7 +231,7 @@ class NYCRPPBot(commands.Bot):
         port = int(port_raw)
 
         async def health(_: web.Request) -> web.Response:
-            return web.json_response({"ok": True, "service": "nycrpp-bot"})
+            return web.json_response({"ok": True, "service": "bpg-bot"})
 
         app = web.Application()
         app.router.add_get("/", health)
@@ -255,7 +255,7 @@ async def main() -> None:
     if not token:
         raise RuntimeError("Missing DISCORD_TOKEN in environment.")
 
-    bot = NYCRPPBot(config)
+    bot = BPGBot(config)
     async with bot:
         try:
             await bot.start(token)
