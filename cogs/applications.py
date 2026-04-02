@@ -13,16 +13,14 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.embed_utils import apply_embed_template
-APPLICATION_REVIEW_ROLE_ID = 1478727168887623791
-LEGACY_ACCEPT_DENY_LOCK_ROLE_ID = 1477383882973249616
-APPLICATION_BLACKLIST_ROLE_ID = 1479234689955926058
-APPLICATION_RESULTS_CHANNEL_ID = 1478729054092918784
-APPLICATION_CATEGORY_ID = 1479196602701975603
-APPLICATION_TICKET_CATEGORY_ID = 1479201857439273010
+APPLICATION_REVIEW_ROLE_ID = 1400844188811006029
+LEGACY_ACCEPT_DENY_LOCK_ROLE_ID = 1400844188811006029
+APPLICATION_BLACKLIST_ROLE_ID = 1400844188651884702
+APPLICATION_RESULTS_CHANNEL_ID = 1438978324180238498
+APPLICATION_CATEGORY_ID = 1489348004816228452
+APPLICATION_TICKET_CATEGORY_ID = 1419290599324123136
 ACCEPT_BANNER_URL = (
-    "https://cdn.discordapp.com/attachments/1417875005387309137/"
-    "1469109135932133419/New_York_City_Roleplay_20250930_123917_0000.png"
-    "?ex=69a965c0&is=69a81440&hm=cc059403c9fadbfef382c7e294c040d3586680090260fd7d3f6e12e21f24e21d&"
+    "https://cdn.discordapp.com/attachments/1400844192833474562/1481386750344564798/Complete_Logo_with_letters.png?ex=69cf78ac&is=69ce272c&hm=58aba65580a506d046489e14578575535dfa5bc299fd46dbb3a76bf9387d64fa&"
 )
 APPLICATION_LOGO_URL = (
     "https://cdn.discordapp.com/attachments/1417875005387309137/"
@@ -39,8 +37,8 @@ MAX_AI_WARNING_STRIKES = 3
 APPLICATION_TIMEOUT_TOTAL_SECONDS = 24 * 60 * 60
 APPLICATION_TIMEOUT_REMINDER_SECONDS = 12 * 60 * 60
 DEFAULT_AI_ERROR_WEBHOOK_URL = (
-    "https://discord.com/api/webhooks/1479224774441046150/"
-    "1JYqXoS9R9zYgUw-S5Y36HgkPTnN2SSlKYCivzsd5Xs5LgOgU5cckfWNx84q4V_y6-i8"
+    "https://discord.com/api/webhooks/1473015317570781334/"
+    "mm_VHjLcZv3jVmiSRl95YRMVdoaDH65W754YrOmTA7J0iQYlZSfwfT1XPj62NRx4OBY1"
 )
 
 ACCEPT_STATUS_CHOICES = [
@@ -72,8 +70,8 @@ DENY_REASON_CHOICES = [
         value="Denied. One or more responses were flagged as AI-generated. Zero-tolerance policy applies.",
     ),
     app_commands.Choice(
-        name="Denied. Answers lacked detail or effort and do not meet Red Rock standards.",
-        value="Denied. Answers lacked detail or effort and do not meet Red Rock standards.",
+        name="Denied. Answers lacked detail or effort and do not meet Blackwater Protection Group standards.",
+        value="Denied. Answers lacked detail or effort and do not meet Blackwater Protection Group standards.",
     ),
     app_commands.Choice(
         name="Denied. Application contained unprofessional or inappropriate content.",
@@ -1567,7 +1565,7 @@ class ApplicationsCog(commands.Cog):
         if not self._can_use_accept_deny_commands(interaction):
             await interaction.response.send_message(
                 "These commands are NOT in-use and should NOT be used. "
-                "Open an General Support Ticket for any questions + DM Thunderbeast_044",
+                "Open a General Support Ticket if you have questions.",
                 ephemeral=True,
             )
             return
@@ -1619,7 +1617,7 @@ class ApplicationsCog(commands.Cog):
         if not self._can_use_accept_deny_commands(interaction):
             await interaction.response.send_message(
                 "These commands are NOT in-use and should NOT be used. "
-                "Open an General Support Ticket for any questions + DM Thunderbeast_044",
+                "Open a General Support Ticket if you have questions.",
                 ephemeral=True,
             )
             return

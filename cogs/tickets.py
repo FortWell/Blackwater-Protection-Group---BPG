@@ -17,12 +17,8 @@ FOOTER_ICON_URL = (
     "https://cdn.discordapp.com/attachments/1417875005387309137/"
     "1475920409709772951/Logo.png"
 )
-TICKET_TRANSCRIPT_WEBHOOK_URL = (
-    "https://discord.com/api/webhooks/1477336234882895953/"
-    "6oBiEDwE9Um6_nOM12wZnIbfxIWOxSlg0bmEwxVeFzNYWl6zmxUBMET0erJYSucq9Yh0"
-)
-APPLICATION_REVIEW_ROLE_ID = 1478727168887623791
-SECURITY_TICKET_BLOCKED_ROLE_ID = 1478860250869399733
+APPLICATION_REVIEW_ROLE_ID = 1400844188811006029
+SECURITY_TICKET_BLOCKED_ROLE_ID = 1428795023968829562
 
 
 @dataclass(slots=True)
@@ -302,15 +298,16 @@ async def _send_ticket_transcript(
     owner_id: int | None,
 ) -> None:
     bot: commands.Bot = interaction.client
+    webhook_url = bot.config.bot_audit_webhook_url.strip()
     transcript = await _build_transcript_text(channel)
     data_bytes = transcript.encode("utf-8", errors="replace")
     filename = f"transcript-{channel.id}.txt"
 
     # Send to webhook
-    if TICKET_TRANSCRIPT_WEBHOOK_URL:
+    if webhook_url:
         try:
             async with aiohttp.ClientSession() as session:
-                webhook = discord.Webhook.from_url(TICKET_TRANSCRIPT_WEBHOOK_URL, session=session)
+                webhook = discord.Webhook.from_url(webhook_url, session=session)
                 await webhook.send(
                     content=f"Ticket transcript for <#{channel.id}>",
                     file=discord.File(io.BytesIO(data_bytes), filename=filename),
