@@ -22,8 +22,8 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
-log = logging.getLogger("nycrpp-bot")
-BOT_LOCKDOWN_ROLE_ID = 1400844188840497171
+log = logging.getLogger("Blackwater Protection Group")
+BOT_LOCKDOWN_ROLE_ID =1400844188840497171
 
 
 class NYCRPPCommandTree(app_commands.CommandTree):
