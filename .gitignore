@@ -16,7 +16,7 @@ env/
 
 # Local runtime data
 data/
+logs/
 
 # Local environment secrets
 .env
-
