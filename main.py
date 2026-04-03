@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import sys
@@ -28,7 +29,7 @@ BOT_LOCKDOWN_ROLE_ID = 1400844188840497171
 
 class BPGCommandTree(app_commands.CommandTree):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        checker = getattr(self.client, "is_command_allowed_in_lockdown", None)
+        checker = getattr(self.client, "is_command_allowed", None)
         if checker is None:
             return True
         return await checker(interaction)
@@ -38,8 +39,14 @@ def _acquire_single_instance_lock() -> int | None:
     # Windows-only named mutex to prevent multiple bot instances.
     if os.name != "nt":
         return None
-    # Use Local namespace to avoid cross-session/global collisions.
-    mutex_name = "Local\\BPG_Blackwater_Protection_Group_MainPy"
+    # Use a config-derived name so separate bot slots can run together.
+    instance_name = os.getenv("BOT_INSTANCE_NAME", "").strip()
+    if not instance_name:
+        db_path = os.getenv("DATABASE_PATH", "").strip() or "data/bot.db"
+        port = os.getenv("PORT", "").strip() or "0"
+        instance_name = f"{db_path}|{port}"
+    digest = hashlib.sha1(instance_name.encode("utf-8")).hexdigest()
+    mutex_name = f"Local\\BPG_Blackwater_Protection_Group_{digest}"
     handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
     if not handle:
         return None
@@ -63,6 +70,8 @@ class BPGBot(commands.Bot):
         self.started_at_monotonic = time.monotonic()
         self.bot_lockdown_enabled = False
         self.bot_lockdown_role_id = BOT_LOCKDOWN_ROLE_ID
+        self.home_guild_id = config.dev_guild_id
+        self.global_ban_role_id = config.global_ban_role_id
 
     async def setup_hook(self) -> None:
         await self.db.init()
@@ -75,11 +84,14 @@ class BPGBot(commands.Bot):
             "cogs.embeds",
             "cogs.tickets",
             "cogs.applications",
+            "cogs.global_bans",
             "cogs.staff",
             "cogs.utility",
         ):
             await self.load_extension(extension)
             log.info("Loaded extension: %s", extension)
+
+        self._scope_commands_to_home_guild()
 
         async def safe_sync_global() -> None:
             try:
@@ -90,30 +102,30 @@ class BPGBot(commands.Bot):
             except Exception:
                 log.exception("Global command sync failed; continuing startup.")
 
-        if self.config.dev_guild_id:
-            guild_obj = discord.Object(id=self.config.dev_guild_id)
-            self.tree.copy_global_to(guild=guild_obj)
+        if self.home_guild_id:
+            guild_obj = discord.Object(id=self.home_guild_id)
+            await safe_sync_global()
             synced_ok = False
             for attempt in range(1, 4):
                 try:
                     synced = await asyncio.wait_for(self.tree.sync(guild=guild_obj), timeout=30)
                     log.info(
-                        "Synced %s commands to dev guild %s (attempt %s)",
+                        "Synced %s commands to home guild %s (attempt %s)",
                         len(synced),
-                        self.config.dev_guild_id,
+                        self.home_guild_id,
                         attempt,
                     )
                     synced_ok = True
                     break
                 except asyncio.TimeoutError:
-                    log.warning("Dev guild sync timed out on attempt %s.", attempt)
+                    log.warning("Home guild sync timed out on attempt %s.", attempt)
                 except Exception:
-                    log.exception("Dev guild sync failed on attempt %s.", attempt)
+                    log.exception("Home guild sync failed on attempt %s.", attempt)
             if not synced_ok:
-                log.warning("Dev guild sync failed after 3 attempts; continuing startup.")
-            # Also sync to all connected guilds so new commands are visible outside the dev guild.
+                log.warning("Home guild sync failed after 3 attempts; continuing startup.")
             for guild in self.guilds:
-                self.tree.copy_global_to(guild=guild)
+                if guild.id == self.home_guild_id:
+                    continue
                 try:
                     synced = await asyncio.wait_for(self.tree.sync(guild=guild), timeout=20)
                     log.info("Synced %s commands to guild %s (%s)", len(synced), guild.name, guild.id)
@@ -123,9 +135,7 @@ class BPGBot(commands.Bot):
                     log.exception("Guild sync failed for %s (%s); continuing.", guild.name, guild.id)
         else:
             await safe_sync_global()
-            # No DEV_GUILD_ID configured: sync to all connected guilds for immediate visibility.
             for guild in self.guilds:
-                self.tree.copy_global_to(guild=guild)
                 try:
                     synced = await asyncio.wait_for(self.tree.sync(guild=guild), timeout=20)
                     log.info("Synced %s commands to guild %s (%s)", len(synced), guild.name, guild.id)
@@ -134,7 +144,44 @@ class BPGBot(commands.Bot):
                 except Exception:
                     log.exception("Guild sync failed for %s (%s); continuing.", guild.name, guild.id)
 
-    async def is_command_allowed_in_lockdown(self, interaction: discord.Interaction) -> bool:
+    def _scope_commands_to_home_guild(self) -> None:
+        if not self.home_guild_id:
+            return
+        for command in self.tree.walk_commands():
+            if command.name == "ping":
+                command.guild_ids = None
+                continue
+            command.guild_ids = [self.home_guild_id]
+
+    async def is_command_allowed(self, interaction: discord.Interaction) -> bool:
+        command_name = interaction.command.qualified_name if interaction.command else ""
+        if command_name == "ping":
+            return True
+
+        if self.home_guild_id and interaction.guild_id not in (None, self.home_guild_id):
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "This bot only accepts commands in the Blackwater Protection Group server. "
+                        "Use `/ping` in other servers.",
+                        ephemeral=True,
+                    )
+            except Exception:
+                pass
+            return False
+
+        if interaction.guild_id is not None and isinstance(interaction.user, discord.Member):
+            if await self.is_user_globally_banned(interaction.user.id):
+                try:
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            "You are globally banned from using this bot.",
+                            ephemeral=True,
+                        )
+                except Exception:
+                    pass
+                return False
+
         if not self.bot_lockdown_enabled:
             return True
         if not isinstance(interaction.user, discord.Member):
@@ -142,6 +189,39 @@ class BPGBot(commands.Bot):
         if interaction.user.get_role(self.bot_lockdown_role_id):
             return True
         return False
+
+    async def is_user_globally_banned(self, user_id: int) -> bool:
+        value = await self.db.fetch_value(
+            "SELECT 1 FROM global_bans WHERE user_id = ? AND is_active = 1 LIMIT 1",
+            (user_id,),
+        )
+        return value is not None
+
+    def build_status_payload(self, *, global_ban_count: int | None = None) -> dict[str, Any]:
+        user = self.user
+        home_guild = self.get_guild(self.home_guild_id) if self.home_guild_id else None
+        latency_ms = round(self.latency * 1000, 2) if self.latency is not None else None
+        uptime_seconds = int(time.monotonic() - self.started_at_monotonic)
+        return {
+            "ok": True,
+            "service": "bpg-bot",
+            "ready": self.is_ready(),
+            "logged_in": user is not None,
+            "user": {
+                "id": user.id,
+                "tag": str(user),
+            }
+            if user is not None
+            else None,
+            "guild_count": len(self.guilds),
+            "latency_ms": latency_ms,
+            "uptime_seconds": uptime_seconds,
+            "home_guild_id": self.home_guild_id,
+            "home_guild_name": home_guild.name if home_guild is not None else None,
+            "lockdown_enabled": self.bot_lockdown_enabled,
+            "global_ban_role_id": self.global_ban_role_id,
+            "global_ban_count": global_ban_count,
+        }
 
     async def on_ready(self) -> None:
         if self.user is None:
@@ -185,6 +265,8 @@ class BPGBot(commands.Bot):
         # Always send a user-visible error so interactions do not appear as "did not respond".
         msg = "Command failed. Please try again."
         if isinstance(error, app_commands.CheckFailure):
+            if interaction.response.is_done():
+                return
             if self.bot_lockdown_enabled:
                 msg = f"Bot is in lockdown. Only <@&{self.bot_lockdown_role_id}> can use bot commands."
             else:
@@ -230,12 +312,17 @@ class BPGBot(commands.Bot):
             return
         port = int(port_raw)
 
-        async def health(_: web.Request) -> web.Response:
-            return web.json_response({"ok": True, "service": "bpg-bot"})
+        async def status(_: web.Request) -> web.Response:
+            global_ban_count_raw = await self.db.fetch_value(
+                "SELECT COUNT(*) FROM global_bans WHERE is_active = 1",
+            )
+            global_ban_count = int(global_ban_count_raw) if global_ban_count_raw is not None else 0
+            return web.json_response(self.build_status_payload(global_ban_count=global_ban_count))
 
         app = web.Application()
-        app.router.add_get("/", health)
-        app.router.add_get("/healthz", health)
+        app.router.add_get("/", status)
+        app.router.add_get("/healthz", status)
+        app.router.add_get("/status", status)
 
         self._web_runner = web.AppRunner(app)
         await self._web_runner.setup()

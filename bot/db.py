@@ -101,6 +101,28 @@ class Database:
             )
             """
         )
+        await self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS global_bans (
+                user_id INTEGER PRIMARY KEY,
+                user_tag TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                notes TEXT NOT NULL,
+                banned_by_id INTEGER NOT NULL,
+                banned_by_tag TEXT NOT NULL,
+                banned_guild_id INTEGER NOT NULL,
+                banned_guild_name TEXT NOT NULL,
+                banned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                unbanned_at TEXT,
+                unbanned_by_id INTEGER,
+                unbanned_by_tag TEXT,
+                unban_reason TEXT,
+                unban_notes TEXT,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
         await self.conn.commit()
 
     async def execute(self, query: str, params: tuple = ()) -> None:
@@ -135,6 +157,13 @@ class Database:
             rows = await cursor.fetchall()
         return rows
 
+    async def fetch_row(self, query: str, params: tuple = ()) -> aiosqlite.Row | None:
+        if self.conn is None:
+            raise RuntimeError("Database not initialized.")
+        async with self.conn.execute(query, params) as cursor:
+            row = await cursor.fetchone()
+        return row
+
     async def get_setting(self, key: str, default: str = "") -> str:
         value = await self.fetch_value(
             "SELECT value FROM bot_settings WHERE key = ?",
@@ -156,6 +185,121 @@ class Database:
             (key, value),
         )
         await self.conn.commit()
+
+    async def upsert_global_ban(
+        self,
+        *,
+        user_id: int,
+        user_tag: str,
+        reason: str,
+        notes: str,
+        banned_by_id: int,
+        banned_by_tag: str,
+        banned_guild_id: int,
+        banned_guild_name: str,
+    ) -> None:
+        if self.conn is None:
+            raise RuntimeError("Database not initialized.")
+        await self.conn.execute(
+            """
+            INSERT INTO global_bans (
+                user_id,
+                user_tag,
+                reason,
+                notes,
+                banned_by_id,
+                banned_by_tag,
+                banned_guild_id,
+                banned_guild_name,
+                banned_at,
+                is_active,
+                unbanned_at,
+                unbanned_by_id,
+                unbanned_by_tag,
+                unban_reason,
+                unban_notes,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 1, NULL, NULL, NULL, NULL, NULL, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                user_tag = excluded.user_tag,
+                reason = excluded.reason,
+                notes = excluded.notes,
+                banned_by_id = excluded.banned_by_id,
+                banned_by_tag = excluded.banned_by_tag,
+                banned_guild_id = excluded.banned_guild_id,
+                banned_guild_name = excluded.banned_guild_name,
+                banned_at = CURRENT_TIMESTAMP,
+                is_active = 1,
+                unbanned_at = NULL,
+                unbanned_by_id = NULL,
+                unbanned_by_tag = NULL,
+                unban_reason = NULL,
+                unban_notes = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                user_id,
+                user_tag,
+                reason,
+                notes,
+                banned_by_id,
+                banned_by_tag,
+                banned_guild_id,
+                banned_guild_name,
+            ),
+        )
+        await self.conn.commit()
+
+    async def set_global_unban(
+        self,
+        *,
+        user_id: int,
+        unbanned_by_id: int,
+        unbanned_by_tag: str,
+        reason: str,
+        notes: str,
+    ) -> bool:
+        if self.conn is None:
+            raise RuntimeError("Database not initialized.")
+        await self.conn.execute(
+            """
+            UPDATE global_bans
+            SET is_active = 0,
+                unbanned_at = CURRENT_TIMESTAMP,
+                unbanned_by_id = ?,
+                unbanned_by_tag = ?,
+                unban_reason = ?,
+                unban_notes = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ? AND is_active = 1
+            """,
+            (unbanned_by_id, unbanned_by_tag, reason, notes, user_id),
+        )
+        await self.conn.commit()
+        return True
+
+    async def fetch_global_ban(self, user_id: int) -> aiosqlite.Row | None:
+        return await self.fetch_row(
+            """
+            SELECT *
+            FROM global_bans
+            WHERE user_id = ?
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+
+    async def fetch_active_global_bans(self) -> list[aiosqlite.Row]:
+        return await self.fetch_rows(
+            """
+            SELECT *
+            FROM global_bans
+            WHERE is_active = 1
+            ORDER BY banned_at DESC, user_tag COLLATE NOCASE ASC
+            """
+        )
 
     async def upsert_embed_message_buttons(
         self,

@@ -12,13 +12,22 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.embed_utils import apply_embed_template
-
-FOOTER_ICON_URL = (
-    "https://cdn.discordapp.com/attachments/1417875005387309137/"
-    "1475920409709772951/Logo.png"
+from bot.branding import (
+    BRANDING_FOOTER_ICON_URL,
+    BRANDING_FOOTER_TEXT,
+    BRANDING_IMAGE_URL,
+    BRANDING_THUMBNAIL_URL,
 )
+FOOTER_ICON_URL = BRANDING_FOOTER_ICON_URL
 APPLICATION_REVIEW_ROLE_ID = 1400844188811006029
 SECURITY_TICKET_BLOCKED_ROLE_ID = 1428795023968829562
+
+
+def _apply_branding(embed: discord.Embed) -> discord.Embed:
+    embed.set_thumbnail(url=BRANDING_THUMBNAIL_URL)
+    embed.set_image(url=BRANDING_IMAGE_URL)
+    embed.set_footer(text=BRANDING_FOOTER_TEXT, icon_url=FOOTER_ICON_URL)
+    return embed
 
 
 @dataclass(slots=True)
@@ -28,6 +37,7 @@ class TicketType:
     category_id: int
     support_role_id: int
     button_style: discord.ButtonStyle
+    open_role_id: int = 0
 
 
 def _ticket_types(cfg) -> dict[str, TicketType]:
@@ -48,10 +58,18 @@ def _ticket_types(cfg) -> dict[str, TicketType]:
         ),
         "general": TicketType(
             key="general",
-            label="General",
+            label="Executive Support",
             category_id=cfg.ticket_general_category_id,
             support_role_id=cfg.ticket_general_support_role_id,
             button_style=discord.ButtonStyle.success,
+        ),
+        "priority": TicketType(
+            key="priority",
+            label="Priority Support",
+            category_id=cfg.ticket_priority_category_id,
+            support_role_id=cfg.ticket_priority_support_role_id,
+            button_style=discord.ButtonStyle.secondary,
+            open_role_id=cfg.ticket_priority_open_role_id,
         ),
     }
 
@@ -87,6 +105,8 @@ def _support_role_for_type(cfg, ticket_type_key: str) -> int:
         return cfg.ticket_security_support_role_id
     if ticket_type_key == "general":
         return cfg.ticket_general_support_role_id
+    if ticket_type_key == "priority":
+        return cfg.ticket_priority_support_role_id
     return 0
 
 
@@ -147,6 +167,7 @@ def _ticket_info_embed(
     ticket_id: int,
     roblox_info: dict[str, Any] | None,
     roblox_error: str | None,
+    extra_fields: list[tuple[str, str]] | None = None,
 ) -> discord.Embed:
     created_date = member.created_at.astimezone(timezone.utc).strftime("%d/%m/%Y")
     embed = discord.Embed(
@@ -180,7 +201,10 @@ def _ticket_info_embed(
         ),
         inline=False,
     )
-    embed.set_footer(text="Powered by Blackwater Protection Group", icon_url=FOOTER_ICON_URL)
+    if extra_fields:
+        for name, value in extra_fields:
+            if name and value:
+                embed.add_field(name=name, value=value, inline=False)
     apply_embed_template(
         embed,
         cfg.embed_templates.get("ticket_info"),
@@ -191,16 +215,15 @@ def _ticket_info_embed(
             "user_id": member.id,
         },
     )
-    return embed
+    return _apply_branding(embed)
 
 
-def _ticket_reason_embed(cfg, reason: str) -> discord.Embed:
+def _ticket_reason_embed(cfg, reason: str, *, title: str = "What is the reason for the ticket?") -> discord.Embed:
     embed = discord.Embed(
-        title="What is the reason for the ticket?",
+        title=title,
         description=reason,
         color=0x2B2D31,
     )
-    embed.set_footer(text="Powered by Blackwater Protection Group", icon_url=FOOTER_ICON_URL)
     apply_embed_template(
         embed,
         cfg.embed_templates.get("ticket_reason"),
@@ -208,7 +231,7 @@ def _ticket_reason_embed(cfg, reason: str) -> discord.Embed:
             "reason": reason,
         },
     )
-    return embed
+    return _apply_branding(embed)
 
 
 def _can_manage_ticket(interaction: discord.Interaction) -> tuple[bool, int | None]:
@@ -382,7 +405,120 @@ class CloseRequestDecisionView(discord.ui.View):
         await interaction.response.send_message("Close request denied. Ticket will remain open.")
 
 
-class TicketReasonModal(discord.ui.Modal, title="Ticket Reason"):
+async def _create_ticket_from_modal(
+    interaction: discord.Interaction,
+    ticket_type: TicketType,
+    *,
+    reason: str,
+    roblox_username: str = "",
+    reason_title: str = "What is the reason for the ticket?",
+    extra_fields: list[tuple[str, str]] | None = None,
+) -> None:
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+    except (discord.NotFound, discord.HTTPException):
+        return
+
+    bot: commands.Bot = interaction.client
+    cfg = bot.config
+    guild = interaction.guild
+    if guild is None or not isinstance(interaction.user, discord.Member):
+        await interaction.followup.send("Tickets can only be created in a server.", ephemeral=True)
+        return
+
+    if ticket_type.key == "security" and interaction.user.get_role(SECURITY_TICKET_BLOCKED_ROLE_ID):
+        await interaction.followup.send(
+            "You can't open this ticket. Go open an Executive Support Ticket, mate.",
+            ephemeral=True,
+        )
+        return
+
+    if ticket_type.open_role_id and not interaction.user.get_role(ticket_type.open_role_id):
+        await interaction.followup.send(
+            "You do not have the required role to open this ticket.",
+            ephemeral=True,
+        )
+        return
+
+    if not ticket_type.category_id:
+        await interaction.followup.send(
+            f"{ticket_type.label} ticket category is not configured.",
+            ephemeral=True,
+        )
+        return
+
+    category = guild.get_channel(ticket_type.category_id)
+    if not isinstance(category, discord.CategoryChannel):
+        await interaction.followup.send(f"{ticket_type.label} category was not found.", ephemeral=True)
+        return
+
+    for ch in category.channels:
+        if not isinstance(ch, discord.TextChannel):
+            continue
+        data = _topic_dict(ch.topic)
+        owner_id = _topic_value_int(data, "ticket-owner")
+        existing_type = data.get("ticket-type")
+        if owner_id == interaction.user.id and existing_type == ticket_type.key:
+            await interaction.followup.send(
+                f"You already have an open {ticket_type.label} ticket: {ch.mention}",
+                ephemeral=True,
+            )
+            return
+
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        interaction.user: discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, read_message_history=True
+        ),
+        guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+    }
+    if ticket_type.support_role_id:
+        support_role = guild.get_role(ticket_type.support_role_id)
+        if support_role:
+            overwrites[support_role] = discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, read_message_history=True
+            )
+
+    base_name = interaction.user.name.lower().replace(" ", "-")
+    channel_name = f"{ticket_type.key}-{base_name}-{interaction.user.discriminator}"
+    ticket_channel = await guild.create_text_channel(
+        name=channel_name[:95],
+        category=category,
+        topic="creating",
+        overwrites=overwrites,
+        reason=f"{ticket_type.label} ticket opened by {interaction.user}",
+    )
+    ticket_id = ticket_channel.id
+    await ticket_channel.edit(
+        topic=_build_topic(
+            owner_id=interaction.user.id,
+            ticket_type=ticket_type.key,
+            ticket_id=ticket_id,
+        )
+    )
+
+    roblox_info, roblox_error = await _fetch_roblox_user(roblox_username)
+    await ticket_channel.send(
+        embed=_ticket_info_embed(
+            cfg,
+            interaction.user,
+            ticket_type,
+            ticket_id,
+            roblox_info=roblox_info,
+            roblox_error=roblox_error,
+            extra_fields=extra_fields,
+        )
+    )
+    await ticket_channel.send(embed=_ticket_reason_embed(cfg, reason, title=reason_title))
+    await ticket_channel.send(view=TicketActionsView())
+    await interaction.followup.send(
+        f"{ticket_type.label} ticket created: {ticket_channel.mention}",
+        ephemeral=True,
+    )
+
+
+class TicketReasonModal(discord.ui.Modal, title="Executive Support Ticket"):
     reason = discord.ui.TextInput(
         label="What is the reason for the ticket?",
         placeholder="Enter the full reason...",
@@ -397,110 +533,55 @@ class TicketReasonModal(discord.ui.Modal, title="Ticket Reason"):
         max_length=40,
     )
 
-    def __init__(self, type_key: str):
+    def __init__(self, ticket_type: TicketType):
         super().__init__(timeout=300)
-        self.type_key = type_key
+        self.ticket_type = ticket_type
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        try:
-            if not interaction.response.is_done():
-                await interaction.response.defer(ephemeral=True)
-        except (discord.NotFound, discord.HTTPException):
-            return
-
-        bot: commands.Bot = interaction.client
-        cfg = bot.config
-        guild = interaction.guild
-        if guild is None or not isinstance(interaction.user, discord.Member):
-            await interaction.followup.send("Tickets can only be created in a server.", ephemeral=True)
-            return
-
-        ticket_type = _ticket_types(cfg).get(self.type_key)
-        if ticket_type is None:
-            await interaction.followup.send("Invalid ticket type.", ephemeral=True)
-            return
-        if (
-            ticket_type.key == "security"
-            and interaction.user.get_role(SECURITY_TICKET_BLOCKED_ROLE_ID)
-        ):
-            await interaction.followup.send(
-                "You can't open this ticket. Go open a General Support Ticket, mate.",
-                ephemeral=True,
-            )
-            return
-        if not ticket_type.category_id:
-            await interaction.followup.send(
-                f"{ticket_type.label} ticket category is not configured.",
-                ephemeral=True,
-            )
-            return
-
-        category = guild.get_channel(ticket_type.category_id)
-        if not isinstance(category, discord.CategoryChannel):
-            await interaction.followup.send(f"{ticket_type.label} category was not found.", ephemeral=True)
-            return
-
-        for ch in category.channels:
-            if not isinstance(ch, discord.TextChannel):
-                continue
-            data = _topic_dict(ch.topic)
-            owner_id = _topic_value_int(data, "ticket-owner")
-            existing_type = data.get("ticket-type")
-            if owner_id == interaction.user.id and existing_type == ticket_type.key:
-                await interaction.followup.send(
-                    f"You already have an open {ticket_type.label} ticket: {ch.mention}",
-                    ephemeral=True,
-                )
-                return
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            interaction.user: discord.PermissionOverwrite(
-                view_channel=True, send_messages=True, read_message_history=True
-            ),
-            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-        }
-        if ticket_type.support_role_id:
-            support_role = guild.get_role(ticket_type.support_role_id)
-            if support_role:
-                overwrites[support_role] = discord.PermissionOverwrite(
-                    view_channel=True, send_messages=True, read_message_history=True
-                )
-
-        base_name = interaction.user.name.lower().replace(" ", "-")
-        channel_name = f"{ticket_type.key}-{base_name}-{interaction.user.discriminator}"
-        ticket_channel = await guild.create_text_channel(
-            name=channel_name[:95],
-            category=category,
-            topic="creating",
-            overwrites=overwrites,
-            reason=f"{ticket_type.label} ticket opened by {interaction.user}",
-        )
-        ticket_id = ticket_channel.id
-        await ticket_channel.edit(
-            topic=_build_topic(
-                owner_id=interaction.user.id,
-                ticket_type=ticket_type.key,
-                ticket_id=ticket_id,
-            )
+        await _create_ticket_from_modal(
+            interaction,
+            self.ticket_type,
+            reason=str(self.reason),
+            roblox_username=str(self.roblox_username),
         )
 
-        roblox_info, roblox_error = await _fetch_roblox_user(str(self.roblox_username))
-        await ticket_channel.send(
-            embed=_ticket_info_embed(
-                cfg,
-                interaction.user,
-                ticket_type,
-                ticket_id,
-                roblox_info=roblox_info,
-                roblox_error=roblox_error,
-            )
-        )
-        await ticket_channel.send(embed=_ticket_reason_embed(cfg, str(self.reason)))
-        await ticket_channel.send(view=TicketActionsView())
-        await interaction.followup.send(
-            f"{ticket_type.label} ticket created: {ticket_channel.mention}",
-            ephemeral=True,
+
+class PriorityTicketReasonModal(discord.ui.Modal, title="Priority Support Ticket"):
+    reason = discord.ui.TextInput(
+        label="Why are you creating this Ticket?",
+        placeholder="Please answer this so we can help you!",
+        style=discord.TextStyle.paragraph,
+        required=True,
+        max_length=900,
+    )
+    hr = discord.ui.TextInput(
+        label="Is this an Ticket for: HR?",
+        placeholder="Answer with True or False Please",
+        style=discord.TextStyle.short,
+        required=True,
+    )
+    shr = discord.ui.TextInput(
+        label="Is this an Ticket for: SHR?",
+        placeholder="Answer this so we can help you!",
+        style=discord.TextStyle.short,
+        required=True,
+    )
+
+    def __init__(self, ticket_type: TicketType):
+        super().__init__(timeout=300)
+        self.ticket_type = ticket_type
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        extra_fields = [
+            ("Is this an Ticket for: HR?", str(self.hr)),
+            ("Is this an Ticket for: SHR?", str(self.shr)),
+        ]
+        await _create_ticket_from_modal(
+            interaction,
+            self.ticket_type,
+            reason=str(self.reason),
+            reason_title="Priority Support Request",
+            extra_fields=extra_fields,
         )
 
 
@@ -582,10 +663,17 @@ class TicketCreateView(discord.ui.View):
         super().__init__(timeout=None)
 
     async def _open_reason_modal(self, interaction: discord.Interaction, type_key: str) -> None:
-        if type_key == "security":
-            if interaction.guild is None or not isinstance(interaction.user, discord.Member):
-                await interaction.response.send_message("This can only be used in a server.", ephemeral=True)
-                return
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("This can only be used in a server.", ephemeral=True)
+            return
+
+        cfg = interaction.client.config
+        ticket_type = _ticket_types(cfg).get(type_key)
+        if ticket_type is None:
+            await interaction.response.send_message("Invalid ticket type.", ephemeral=True)
+            return
+
+        if ticket_type.key == "security":
             is_blocked = any(role.id == SECURITY_TICKET_BLOCKED_ROLE_ID for role in interaction.user.roles)
             if not is_blocked:
                 # Fetch fresh member roles in case cache is stale.
@@ -596,11 +684,31 @@ class TicketCreateView(discord.ui.View):
                     is_blocked = False
             if is_blocked:
                 await interaction.response.send_message(
-                    "You can't open this ticket. Go open a General Support Ticket, mate.",
+                    "You can't open this ticket. Go open an Executive Support Ticket, mate.",
                     ephemeral=True,
                 )
                 return
-        await interaction.response.send_modal(TicketReasonModal(type_key))
+
+        if ticket_type.key == "priority" and ticket_type.open_role_id:
+            has_access = bool(interaction.user.get_role(ticket_type.open_role_id))
+            if not has_access:
+                try:
+                    fresh = await interaction.guild.fetch_member(interaction.user.id)
+                    has_access = any(role.id == ticket_type.open_role_id for role in fresh.roles)
+                except discord.HTTPException:
+                    has_access = False
+            if not has_access:
+                await interaction.response.send_message(
+                    "You do not have the required role to open this ticket.",
+                    ephemeral=True,
+                )
+                return
+
+        if ticket_type.key == "priority":
+            await interaction.response.send_modal(PriorityTicketReasonModal(ticket_type))
+            return
+
+        await interaction.response.send_modal(TicketReasonModal(ticket_type))
 
     @discord.ui.button(label="Management", style=discord.ButtonStyle.danger, custom_id="ticket:create:management")
     async def management(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
@@ -613,15 +721,19 @@ class TicketCreateView(discord.ui.View):
             return
         if interaction.user.get_role(SECURITY_TICKET_BLOCKED_ROLE_ID):
             await interaction.response.send_message(
-                "You can't open this ticket. Go open a General Support Ticket, mate.",
+                "You can't open this ticket. Go open an Executive Support Ticket, mate.",
                 ephemeral=True,
             )
             return
         await self._open_reason_modal(interaction, "security")
 
-    @discord.ui.button(label="General", style=discord.ButtonStyle.success, custom_id="ticket:create:general")
+    @discord.ui.button(label="Executive Support", style=discord.ButtonStyle.success, custom_id="ticket:create:general")
     async def general(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         await self._open_reason_modal(interaction, "general")
+
+    @discord.ui.button(label="Priority Support", style=discord.ButtonStyle.secondary, custom_id="ticket:create:priority")
+    async def priority(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await self._open_reason_modal(interaction, "priority")
 
 
 class TicketsCog(commands.Cog):
@@ -636,6 +748,7 @@ class TicketsCog(commands.Cog):
             cfg.ticket_management_support_role_id,
             cfg.ticket_security_support_role_id,
             cfg.ticket_general_support_role_id,
+            cfg.ticket_priority_support_role_id,
         }
         role_ids = {rid for rid in role_ids if rid}
         if not role_ids:
@@ -663,7 +776,8 @@ class TicketsCog(commands.Cog):
                 "Open a ticket by selecting a category below:\n"
                 "• Management Ticket\n"
                 "• Security Ticket\n"
-                "• General Ticket"
+                "• Executive Support Ticket\n"
+                "• Priority Support Ticket"
             ),
             color=0x0B1E3D,
         )
@@ -671,6 +785,7 @@ class TicketsCog(commands.Cog):
             embed,
             self.bot.config.embed_templates.get("ticket_panel"),
         )
+        _apply_branding(embed)
 
         async for msg in interaction.channel.history(limit=30):
             if msg.author.id != self.bot.user.id:
@@ -736,3 +851,5 @@ class TicketsCog(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(TicketsCog(bot))
+
+

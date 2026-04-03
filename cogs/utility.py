@@ -9,6 +9,13 @@ import psutil
 from discord import app_commands
 from discord.ext import commands
 
+from bot.branding import (
+    BRANDING_FOOTER_ICON_URL,
+    BRANDING_FOOTER_TEXT,
+    BRANDING_IMAGE_URL,
+    BRANDING_THUMBNAIL_URL,
+)
+
 LOCKDOWN_ROLE_ID = 1400844188840497171
 OPORATION_BLITZ_ROLE_ID = 1478860250869399733
 OPORATION_BLITZ_WEBHOOK_URL = (
@@ -64,6 +71,9 @@ class UtilityCog(commands.Cog):
         embed.add_field(name="CPU Usage", value=f"`{cpu_percent:.1f}%`", inline=True)
         embed.add_field(name="RAM Usage", value=f"`{ram_mb:.1f} MB`", inline=True)
         embed.add_field(name="Uptime", value=f"`{_format_uptime(uptime_seconds)}`", inline=False)
+        embed.set_thumbnail(url=BRANDING_THUMBNAIL_URL)
+        embed.set_image(url=BRANDING_IMAGE_URL)
+        embed.set_footer(text=BRANDING_FOOTER_TEXT, icon_url=BRANDING_FOOTER_ICON_URL)
 
         await interaction.followup.send(embed=embed)
 
@@ -160,13 +170,13 @@ class UtilityCog(commands.Cog):
 
         webhook_text = (
             "Hello @here,\n\n"
-            "The server was Not raided.\n"
-            f"Clarification: The owner of this bot: thunderbeast_044 was: {reasson}\n\n"
-            "So as said in the Terms Of Service of this Bots Agreement, All Assets under the Bot such as: "
-            "Embeds and any other such are property of: thunderbeast_044 Only.\n"
-            "The Blackwater Protection Group bot assets are only permitted to be used by authorized servers "
-            "while the owner of this bot consents and is present in the server using them.\n\n"
-            "For more information please Contact: thunderbeast_044"
+            "The server was not raided.\n"
+            f"Clarification: The reason provided was: {reasson}\n\n"
+            "As stated in the Blackwater Protection Group bot policy, all bot assets such as embeds and related content "
+            "are property of Blackwater Protection Group only.\n"
+            "The Blackwater Protection Group bot assets are only permitted to be used by authorized servers while "
+            "Blackwater Protection Group consents and is present in the server using them.\n\n"
+            "For more information please contact Blackwater Protection Group staff."
         )
 
         webhook_ok = True

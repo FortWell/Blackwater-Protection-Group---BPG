@@ -10,6 +10,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.branding import (
+    BRANDING_FOOTER_ICON_URL,
+    BRANDING_FOOTER_TEXT,
+    BRANDING_IMAGE_URL,
+    BRANDING_THUMBNAIL_URL,
+)
+
 log = logging.getLogger(__name__)
 
 MAX_TITLE_LEN = 256
@@ -42,6 +49,13 @@ def _resolve_color(color: app_commands.Choice[str] | None, fallback: int = 0x000
     if color.value == "dark_blue":
         return 0x0B1E3D
     return 0x000000
+
+
+def _apply_branding(embed: discord.Embed) -> discord.Embed:
+    embed.set_thumbnail(url=BRANDING_THUMBNAIL_URL)
+    embed.set_image(url=BRANDING_IMAGE_URL)
+    embed.set_footer(text=BRANDING_FOOTER_TEXT, icon_url=BRANDING_FOOTER_ICON_URL)
+    return embed
 
 
 def _build_embed(
@@ -317,7 +331,7 @@ class EmbedButtonItem(discord.ui.Button):
             description=_trim_text(self.response_text, MAX_BUTTON_DESCRIPTION_LEN),
             color=0x0B1E3D,
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(embed=_apply_branding(embed), ephemeral=True)
 
 
 class EmbedButtonView(discord.ui.View):
@@ -457,15 +471,17 @@ class EmbedsCog(commands.Cog):
         footer_icon_url: str | None,
         fields: list[tuple[str | None, str | None]],
     ) -> discord.Embed:
-        return _build_embed(
-            title=title,
-            description=_preserve_description_structure(description),
-            color_value=_resolve_color(color, fallback=0x000000),
-            image_url=image_url,
-            thumbnail_url=thumbnail_url,
-            footer_text=footer_text,
-            footer_icon_url=footer_icon_url,
-            fields=fields,
+        return _apply_branding(
+            _build_embed(
+                title=title,
+                description=_preserve_description_structure(description),
+                color_value=_resolve_color(color, fallback=0x000000),
+                image_url=image_url,
+                thumbnail_url=thumbnail_url,
+                footer_text=footer_text,
+                footer_icon_url=footer_icon_url,
+                fields=fields,
+            )
         )
 
     @app_commands.command(name="say", description="Send a plain message to a channel")
@@ -639,9 +655,6 @@ class EmbedsCog(commands.Cog):
 
         current = message.embeds[0]
 
-        fallback = current.color.value if current.color else 0x000000
-        color_value = _resolve_color(color, fallback=fallback)
-
         title_final = title if title is not None else (current.title or "")
         description_final = description if description is not None else (current.description or "")
         image_final = image_url if image_url is not None else (current.image.url if current.image else None)
@@ -687,10 +700,10 @@ class EmbedsCog(commands.Cog):
         field6_name_final = field6_name if field6_name is not None else old6n
         field6_value_final = field6_value if field6_value is not None else old6v
 
-        embed = _build_embed(
+        embed = self._build_send_embed(
             title=title_final,
             description=description_input or "",
-            color_value=color_value,
+            color=color,
             image_url=image_final,
             thumbnail_url=thumb_final,
             footer_text=footer_text_final,
@@ -796,18 +809,11 @@ class EmbedsCog(commands.Cog):
                 title="No permission.",
                 description=(
                     "You do NOT have permission to use this command.\n"
-                    "Please open a Support ticket."
+                    "Please open an Executive Support ticket."
                 ),
                 color=0xD63324,
             )
-            no_perm.set_image(
-                url=(
-                    "https://cdn.discordapp.com/attachments/1400844192833474562/1481386750344564798/Complete_Logo_with_letters.png?ex=69be552c&is=69bd03ac&hm=f5a7d2d5b5c8e400739a90df1630031d4953096c722f3a48ced9cbe26abc3773&"
-                )
-            )
-            if self.bot.config.asset_logo_url:
-                no_perm.set_thumbnail(url=self.bot.config.asset_logo_url)
-            await interaction.response.send_message(embed=no_perm, ephemeral=True)
+            await interaction.response.send_message(embed=_apply_branding(no_perm), ephemeral=True)
             return
 
         if interaction.guild is None:

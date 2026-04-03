@@ -13,6 +13,12 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.embed_utils import apply_embed_template
+from bot.branding import (
+    BRANDING_FOOTER_ICON_URL,
+    BRANDING_FOOTER_TEXT,
+    BRANDING_IMAGE_URL,
+    BRANDING_THUMBNAIL_URL,
+)
 APPLICATION_REVIEW_ROLE_ID = 1400844188811006029
 LEGACY_ACCEPT_DENY_LOCK_ROLE_ID = 1400844188811006029
 APPLICATION_BLACKLIST_ROLE_ID = 1400844188651884702
@@ -20,19 +26,15 @@ APPLICATION_RESULTS_CHANNEL_ID = 1438978324180238498
 APPLICATION_CATEGORY_ID = 1489348004816228452
 APPLICATION_TICKET_CATEGORY_ID = 1419290599324123136
 ACCEPT_BANNER_URL = (
-    "https://cdn.discordapp.com/attachments/1400844192833474562/1481386750344564798/Complete_Logo_with_letters.png?ex=69cf78ac&is=69ce272c&hm=58aba65580a506d046489e14578575535dfa5bc299fd46dbb3a76bf9387d64fa&"
+    BRANDING_IMAGE_URL
 )
 APPLICATION_LOGO_URL = (
-    "https://cdn.discordapp.com/attachments/1417875005387309137/"
-    "1475920409709772951/Logo.png"
-    "?ex=69a920be&is=69a7cf3e&hm=469a475936121c8397acdd13b932e90ef83bea8f7f47feeea704340c2f2ad82f&"
+    BRANDING_THUMBNAIL_URL
 )
 AI_TEST_LOGO_URL = (
-    "https://cdn.discordapp.com/attachments/1417875005387309137/"
-    "1475920409709772951/Logo.png"
-    "?ex=69aa723e&is=69a920be&hm=46119514c342478ed9e77aeb4df04f2134bf821c3c4976c7c8b7c37e1d1db47d&"
+    BRANDING_THUMBNAIL_URL
 )
-AI_TEST_IMAGE_URL = ACCEPT_BANNER_URL
+AI_TEST_IMAGE_URL = BRANDING_IMAGE_URL
 MAX_AI_WARNING_STRIKES = 3
 APPLICATION_TIMEOUT_TOTAL_SECONDS = 24 * 60 * 60
 APPLICATION_TIMEOUT_REMINDER_SECONDS = 12 * 60 * 60
@@ -366,6 +368,7 @@ class ApplicationsCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._application_slots = asyncio.Semaphore(3)
+        self._application_cancel_events: dict[int, asyncio.Event] = {}
 
     def _can_manage_applications(self, interaction: discord.Interaction) -> bool:
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
@@ -391,6 +394,52 @@ class ApplicationsCog(commands.Cog):
             return True
         return bool(interaction.user.get_role(LEGACY_ACCEPT_DENY_LOCK_ROLE_ID))
 
+    def _set_application_cancel_event(self, user_id: int) -> asyncio.Event:
+        event = asyncio.Event()
+        self._application_cancel_events[user_id] = event
+        return event
+
+    def _clear_application_cancel_event(self, user_id: int, event: asyncio.Event | None = None) -> None:
+        current = self._application_cancel_events.get(user_id)
+        if current is None:
+            return
+        if event is None or current is event:
+            self._application_cancel_events.pop(user_id, None)
+
+    def _get_application_cancel_event(self, user_id: int) -> asyncio.Event | None:
+        return self._application_cancel_events.get(user_id)
+
+    async def _wait_for_application_reply(
+        self,
+        *,
+        user: discord.Member,
+        dm: discord.DMChannel,
+        cancel_event: asyncio.Event,
+        timeout: float,
+    ) -> tuple[discord.Message | None, bool]:
+        def check(msg: discord.Message) -> bool:
+            return msg.author.id == user.id and msg.channel.id == dm.id
+
+        message_task = asyncio.create_task(self.bot.wait_for("message", check=check))
+        cancel_task = asyncio.create_task(cancel_event.wait())
+        try:
+            done, pending = await asyncio.wait(
+                {message_task, cancel_task},
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if not done:
+                return None, False
+            if cancel_task in done:
+                return None, True
+            reply = await message_task
+            return reply, False
+        finally:
+            for task in (message_task, cancel_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(message_task, cancel_task, return_exceptions=True)
+
     async def _send_ai_error_webhook(
         self,
         provider: str,
@@ -414,7 +463,7 @@ class ApplicationsCog(commands.Cog):
         embed.add_field(name="Status", value=str(status_code) if status_code is not None else "N/A", inline=True)
         if detail:
             embed.add_field(name="Detail", value=detail[:1000], inline=False)
-        embed.set_footer(text="Blackwater Protection Group", icon_url=APPLICATION_LOGO_URL)
+        embed.set_footer(text=BRANDING_FOOTER_TEXT, icon_url=BRANDING_FOOTER_ICON_URL)
         apply_embed_template(
             embed,
             self.bot.config.embed_templates.get("app_ai_error"),
@@ -741,7 +790,7 @@ class ApplicationsCog(commands.Cog):
         embed.set_author(name="Artificial Intelligence Test")
         embed.set_thumbnail(url=AI_TEST_LOGO_URL)
         embed.set_image(url=AI_TEST_IMAGE_URL)
-        embed.set_footer(text="Blackwater Protection Group", icon_url=AI_TEST_LOGO_URL)
+        embed.set_footer(text=BRANDING_FOOTER_TEXT, icon_url=BRANDING_FOOTER_ICON_URL)
         apply_embed_template(
             embed,
             self.bot.config.embed_templates.get("app_ai_hold"),
@@ -760,7 +809,7 @@ class ApplicationsCog(commands.Cog):
         embed.set_author(name="Artificial Intelligence Test _ COMPLETED")
         embed.set_thumbnail(url=AI_TEST_LOGO_URL)
         embed.set_image(url=AI_TEST_IMAGE_URL)
-        embed.set_footer(text="Blackwater Protection Group", icon_url=AI_TEST_LOGO_URL)
+        embed.set_footer(text=BRANDING_FOOTER_TEXT, icon_url=BRANDING_FOOTER_ICON_URL)
         apply_embed_template(
             embed,
             self.bot.config.embed_templates.get("app_ai_completed"),
@@ -780,7 +829,7 @@ class ApplicationsCog(commands.Cog):
         embed.set_author(name="Artificial Intelligence Test _ WARNING")
         embed.set_thumbnail(url=AI_TEST_LOGO_URL)
         embed.set_image(url=AI_TEST_IMAGE_URL)
-        embed.set_footer(text="Blackwater Protection Group", icon_url=AI_TEST_LOGO_URL)
+        embed.set_footer(text=BRANDING_FOOTER_TEXT, icon_url=BRANDING_FOOTER_ICON_URL)
         apply_embed_template(
             embed,
             self.bot.config.embed_templates.get("app_ai_warning"),
@@ -926,13 +975,13 @@ class ApplicationsCog(commands.Cog):
             title="Application Canceled",
             description=(
                 f"Applicant: {applicant.mention} (`{applicant.id}`)\n"
-                "This application was canceled by the applicant with `!cancel`."
+                "This application was canceled by the applicant."
             ),
             color=0xB32020,
         )
         embed.set_thumbnail(url=APPLICATION_LOGO_URL)
         embed.set_image(url=ACCEPT_BANNER_URL)
-        embed.set_footer(text="Blackwater Protection Group", icon_url=APPLICATION_LOGO_URL)
+        embed.set_footer(text=BRANDING_FOOTER_TEXT, icon_url=BRANDING_FOOTER_ICON_URL)
         apply_embed_template(
             embed,
             self.bot.config.embed_templates.get("app_canceled"),
@@ -946,6 +995,53 @@ class ApplicationsCog(commands.Cog):
             filename=f"application-canceled-{log_channel.id}.txt",
         )
         await log_channel.send(embed=embed, file=transcript_file)
+
+    async def _cancel_application_session(
+        self,
+        *,
+        guild: discord.Guild,
+        user: discord.Member,
+        dm: discord.DMChannel,
+        session_id: int,
+        strikes: int,
+        log_channel: discord.TextChannel,
+        transcript_lines: list[str],
+        answers: list[dict[str, str | float]],
+        max_ai_score: float,
+        roblox_info: dict[str, Any] | None,
+        roblox_error: str | None,
+        source: str,
+    ) -> None:
+        cancel_line = f"[SYSTEM] Applicant canceled the application via {source}."
+        transcript_lines.append(cancel_line)
+        transcript_lines.append(f"Canceled: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        await dm.send("Application canceled successfully.")
+        await log_channel.send(cancel_line)
+        await self._update_application_session(session_id, status="CANCELED_BY_USER", strike_count=strikes)
+        await self._log_application_event(
+            session_id,
+            "APPLICATION_CANCELED",
+            content=f"Canceled by user via {source}",
+            strike_count=strikes,
+        )
+        await self.bot.db.execute(
+            """
+            INSERT INTO applications (guild_id, user_id, status, ai_flagged, max_ai_score, answers_json)
+            VALUES (?, ?, ?, 0, ?, ?)
+            """,
+            (
+                guild.id,
+                user.id,
+                "CANCELED_BY_USER",
+                max_ai_score,
+                json.dumps(answers),
+            ),
+        )
+        await self._send_canceled_transcript(
+            log_channel=log_channel,
+            applicant=user,
+            transcript_text="\n".join(transcript_lines),
+        )
 
     async def _monitor_hold_violations(
         self,
@@ -1012,7 +1108,7 @@ class ApplicationsCog(commands.Cog):
             ),
             color=0xB32020,
         )
-        embed.set_footer(text="Blackwater Protection Group", icon_url=AI_TEST_LOGO_URL)
+        embed.set_footer(text=BRANDING_FOOTER_TEXT, icon_url=BRANDING_FOOTER_ICON_URL)
         apply_embed_template(
             embed,
             self.bot.config.embed_templates.get("app_closed_strike"),
@@ -1076,7 +1172,7 @@ class ApplicationsCog(commands.Cog):
         embed = discord.Embed(title="Application Results", description=body, color=color)
         embed.set_image(url=ACCEPT_BANNER_URL)
         embed.set_thumbnail(url=APPLICATION_LOGO_URL)
-        embed.set_footer(text="Blackwater Protection Group", icon_url=APPLICATION_LOGO_URL)
+        embed.set_footer(text=BRANDING_FOOTER_TEXT, icon_url=BRANDING_FOOTER_ICON_URL)
         apply_embed_template(
             embed,
             template,
@@ -1141,7 +1237,7 @@ class ApplicationsCog(commands.Cog):
             embed.add_field(name=f"Q{idx}: {q}", value=value, inline=False)
         embed.set_thumbnail(url=APPLICATION_LOGO_URL)
         embed.set_image(url=ACCEPT_BANNER_URL)
-        embed.set_footer(text="Blackwater Protection Group", icon_url=APPLICATION_LOGO_URL)
+        embed.set_footer(text=BRANDING_FOOTER_TEXT, icon_url=BRANDING_FOOTER_ICON_URL)
         apply_embed_template(
             embed,
             self.bot.config.embed_templates.get("app_review_submitted"),
@@ -1174,8 +1270,11 @@ class ApplicationsCog(commands.Cog):
             await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
             return
 
+        user = interaction.user
+        guild = interaction.guild
         await interaction.response.defer(ephemeral=True)
         slot_acquired = False
+        cancel_event: asyncio.Event | None = None
         try:
             try:
                 await asyncio.wait_for(self._application_slots.acquire(), timeout=0.01)
@@ -1188,14 +1287,12 @@ class ApplicationsCog(commands.Cog):
                 )
                 return
 
-            user = interaction.user
-            guild = interaction.guild
             if await self._member_has_role_id(guild, user, APPLICATION_BLACKLIST_ROLE_ID):
                 try:
                     dm = await user.create_dm()
                     await dm.send(
                         "This is being recorded. You are BLACKLISTED and may NOT apply. "
-                        "Any questions? Open a General Support Ticket."
+                        "Any questions? Open an Executive Support Ticket."
                     )
                 except discord.HTTPException:
                     pass
@@ -1208,7 +1305,7 @@ class ApplicationsCog(commands.Cog):
                         )
                 await interaction.followup.send(
                     "This is being recorded. You are BLACKLISTED and may NOT apply. "
-                    "Any questions? Open a General Support Ticket.",
+                    "Any questions? Open an Executive Support Ticket.",
                     ephemeral=True,
                 )
                 return
@@ -1259,11 +1356,12 @@ class ApplicationsCog(commands.Cog):
                 (guild.id, user.id, log_channel.id, "IN_PROGRESS"),
             )
             await self._log_application_event(session_id, "APPLICATION_STARTED", content="Application started in DM flow.")
+            cancel_event = self._set_application_cancel_event(user.id)
 
             try:
                 dm = await user.create_dm()
                 # Intro/section content is sent from the configured flow below.
-                await dm.send("To cancel this application at any time, type: `!cancel`")
+                await dm.send("To cancel this application at any time, use `/cancel` or type `cancel` here.")
             except discord.HTTPException:
                 await self._update_application_session(session_id, status="DM_BLOCKED", strike_count=0)
                 await self._log_application_event(session_id, "DM_BLOCKED", content="User has DMs disabled.")
@@ -1313,13 +1411,29 @@ class ApplicationsCog(commands.Cog):
                 await self._log_application_event(session_id, "QUESTION_SENT", content=question, strike_count=strikes)
                 close_at = datetime.now(timezone.utc).timestamp() + APPLICATION_TIMEOUT_TOTAL_SECONDS
                 close_ts = int(close_at)
-                try:
-                    reply = await self.bot.wait_for(
-                        "message",
-                        check=check,
-                        timeout=APPLICATION_TIMEOUT_REMINDER_SECONDS,
+                reply, canceled = await self._wait_for_application_reply(
+                    user=user,
+                    dm=dm,
+                    cancel_event=cancel_event,
+                    timeout=APPLICATION_TIMEOUT_REMINDER_SECONDS,
+                )
+                if canceled:
+                    await self._cancel_application_session(
+                        guild=guild,
+                        user=user,
+                        dm=dm,
+                        session_id=session_id,
+                        strikes=strikes,
+                        log_channel=log_channel,
+                        transcript_lines=transcript_lines,
+                        answers=answers,
+                        max_ai_score=max_ai_score,
+                        roblox_info=roblox_info,
+                        roblox_error=roblox_error,
+                        source="/cancel",
                     )
-                except asyncio.TimeoutError:
+                    return
+                if reply is None:
                     reminder_msg = (
                         f"Hello! {user.mention} you have left the application in `{question}` "
                         "please continue your application or in 24 hours it will be closed! "
@@ -1336,9 +1450,29 @@ class ApplicationsCog(commands.Cog):
                         strike_count=strikes,
                     )
                     remaining = max(1, int(close_at - datetime.now(timezone.utc).timestamp()))
-                    try:
-                        reply = await self.bot.wait_for("message", check=check, timeout=remaining)
-                    except asyncio.TimeoutError:
+                    reply, canceled = await self._wait_for_application_reply(
+                        user=user,
+                        dm=dm,
+                        cancel_event=cancel_event,
+                        timeout=remaining,
+                    )
+                    if canceled:
+                        await self._cancel_application_session(
+                            guild=guild,
+                            user=user,
+                            dm=dm,
+                            session_id=session_id,
+                            strikes=strikes,
+                            log_channel=log_channel,
+                            transcript_lines=transcript_lines,
+                            answers=answers,
+                            max_ai_score=max_ai_score,
+                            roblox_info=roblox_info,
+                            roblox_error=roblox_error,
+                            source="/cancel",
+                        )
+                        return
+                    if reply is None:
                         await dm.send(
                             f"Application closed due to inactivity. No response was received by <t:{close_ts}:F>."
                         )
@@ -1354,36 +1488,21 @@ class ApplicationsCog(commands.Cog):
                         )
                         return
 
-                if reply.content.strip().lower() == "!cancel":
-                    cancel_line = "[SYSTEM] Applicant canceled the application with !cancel."
-                    transcript_lines.append(cancel_line)
-                    transcript_lines.append(f"Canceled: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
-                    await dm.send("Application canceled successfully.")
-                    await log_channel.send(cancel_line)
-                    await self._update_application_session(session_id, status="CANCELED_BY_USER", strike_count=strikes)
-                    await self._log_application_event(
-                        session_id,
-                        "APPLICATION_CANCELED",
-                        content="Canceled by user via !cancel",
-                        strike_count=strikes,
-                    )
-                    await self.bot.db.execute(
-                        """
-                        INSERT INTO applications (guild_id, user_id, status, ai_flagged, max_ai_score, answers_json)
-                        VALUES (?, ?, ?, 0, ?, ?)
-                        """,
-                        (
-                            guild.id,
-                            user.id,
-                            "CANCELED_BY_USER",
-                            max_ai_score,
-                            json.dumps(answers),
-                        ),
-                    )
-                    await self._send_canceled_transcript(
+                reply_content = (reply.content or "").strip().lower()
+                if reply_content in {"!cancel", "cancel"}:
+                    await self._cancel_application_session(
+                        guild=guild,
+                        user=user,
+                        dm=dm,
+                        session_id=session_id,
+                        strikes=strikes,
                         log_channel=log_channel,
-                        applicant=user,
-                        transcript_text="\n".join(transcript_lines),
+                        transcript_lines=transcript_lines,
+                        answers=answers,
+                        max_ai_score=max_ai_score,
+                        roblox_info=roblox_info,
+                        roblox_error=roblox_error,
+                        source="message cancel",
                     )
                     return
 
@@ -1540,8 +1659,26 @@ class ApplicationsCog(commands.Cog):
             await dm.send("Application submitted successfully and is now pending staff review.")
             await log_channel.send("Application submitted successfully and is now pending staff review.")
         finally:
+            if cancel_event is not None:
+                self._clear_application_cancel_event(user.id, cancel_event)
             if slot_acquired:
                 self._application_slots.release()
+
+    @app_commands.command(name="cancel", description="Cancel your active application.")
+    async def cancel(self, interaction: discord.Interaction) -> None:
+        event = self._get_application_cancel_event(interaction.user.id)
+        if event is None:
+            await interaction.response.send_message(
+                "I could not find an active application to cancel.",
+                ephemeral=True,
+            )
+            return
+
+        event.set()
+        await interaction.response.send_message(
+            "Cancellation requested. Your application will stop shortly.",
+            ephemeral=True,
+        )
 
     @app_commands.command(name="accept", description="Accept or deny an application with professional review output.")
     @app_commands.describe(
@@ -1565,7 +1702,7 @@ class ApplicationsCog(commands.Cog):
         if not self._can_use_accept_deny_commands(interaction):
             await interaction.response.send_message(
                 "These commands are NOT in-use and should NOT be used. "
-                "Open a General Support Ticket if you have questions.",
+                "Open an Executive Support Ticket if you have questions.",
                 ephemeral=True,
             )
             return
@@ -1617,7 +1754,7 @@ class ApplicationsCog(commands.Cog):
         if not self._can_use_accept_deny_commands(interaction):
             await interaction.response.send_message(
                 "These commands are NOT in-use and should NOT be used. "
-                "Open a General Support Ticket if you have questions.",
+                "Open an Executive Support Ticket if you have questions.",
                 ephemeral=True,
             )
             return
@@ -1708,7 +1845,7 @@ class ApplicationsCog(commands.Cog):
             ),
         )
         embed.set_thumbnail(url=APPLICATION_LOGO_URL)
-        embed.set_footer(text="Blackwater Protection Group", icon_url=APPLICATION_LOGO_URL)
+        embed.set_footer(text=BRANDING_FOOTER_TEXT, icon_url=BRANDING_FOOTER_ICON_URL)
         apply_embed_template(
             embed,
             self.bot.config.embed_templates.get("app_search_results"),

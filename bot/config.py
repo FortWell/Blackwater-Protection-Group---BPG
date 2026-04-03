@@ -7,6 +7,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from bot.branding import BRANDING_THUMBNAIL_URL
+
 
 def _as_int(name: str, default: int = 0) -> int:
     value = os.getenv(name, "").strip()
@@ -156,6 +158,7 @@ class BotConfig:
     role_id_send: int
     staff_management_role_id: int
     staff_management_role_ids: list[int]
+    global_ban_role_id: int
     bot_log_channel_id: int
     bot_audit_webhook_url: str
     staff_promotion_channel_id: int
@@ -166,6 +169,9 @@ class BotConfig:
     ticket_security_support_role_id: int
     ticket_general_category_id: int
     ticket_general_support_role_id: int
+    ticket_priority_category_id: int
+    ticket_priority_support_role_id: int
+    ticket_priority_open_role_id: int
     application_review_channel_id: int
     apply_min_ai_score: float
     application_questions: list[str]
@@ -209,6 +215,7 @@ class BotConfig:
             role_id_send=_as_int("ROLE_ID_SEND"),
             staff_management_role_id=_as_int("STAFF_MANAGEMENT_ROLE_ID"),
             staff_management_role_ids=_as_int_list("STAFF_MANAGEMENT_ROLE_IDS"),
+            global_ban_role_id=_as_int("GLOBAL_BAN_ROLE_ID"),
             bot_log_channel_id=_as_int("BOT_LOG_CHANNEL_ID") or _as_int("STAFF_LOG_CHANNEL_ID"),
             bot_audit_webhook_url=os.getenv("BOT_AUDIT_WEBHOOK_URL", "").strip(),
             staff_promotion_channel_id=_as_int("STAFF_PROMOTION_CHANNEL_ID"),
@@ -219,6 +226,9 @@ class BotConfig:
             ticket_security_support_role_id=_as_int("TICKET_SECURITY_SUPPORT_ROLE_ID"),
             ticket_general_category_id=_as_int("TICKET_GENERAL_CATEGORY_ID"),
             ticket_general_support_role_id=_as_int("TICKET_GENERAL_SUPPORT_ROLE_ID"),
+            ticket_priority_category_id=_as_int("TICKET_PRIORITY_CATEGORY_ID"),
+            ticket_priority_support_role_id=_as_int("TICKET_PRIORITY_SUPPORT_ROLE_ID"),
+            ticket_priority_open_role_id=_as_int("TICKET_PRIORITY_OPEN_ROLE_ID"),
             application_review_channel_id=_as_int("APPLICATION_REVIEW_CHANNEL_ID"),
             apply_min_ai_score=ai_threshold,
             application_questions=questions,
@@ -230,7 +240,7 @@ class BotConfig:
             cloudflare_model=os.getenv("CLOUDFLARE_MODEL", "@cf/meta/llama-3.1-8b-instruct").strip() or "@cf/meta/llama-3.1-8b-instruct",
             ai_error_webhook_url=os.getenv("AI_ERROR_WEBHOOK_URL", "").strip(),
             ai_request_timeout_seconds=_as_float("AI_REQUEST_TIMEOUT_SECONDS", 12.0),
-            asset_logo_url=os.getenv("ASSET_LOGO_URL", "").strip(),
+            asset_logo_url=os.getenv("ASSET_LOGO_URL", BRANDING_THUMBNAIL_URL).strip() or BRANDING_THUMBNAIL_URL,
             embed_templates={
                 "app_ai_hold": _load_embed_template("APP_AI_HOLD_EMBED"),
                 "app_ai_completed": _load_embed_template("APP_AI_COMPLETED_EMBED"),

@@ -4,6 +4,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.branding import (
+    BRANDING_FOOTER_ICON_URL,
+    BRANDING_FOOTER_TEXT,
+    BRANDING_IMAGE_URL,
+    BRANDING_THUMBNAIL_URL,
+)
+
 
 PUNISHMENTS = [
     ("Termination", "TERMINATION"),
@@ -18,12 +25,10 @@ PUNISHMENTS = [
 ]
 
 PROMOTION_BANNER_URL = (
-    "https://cdn.discordapp.com/attachments/1417875005387309137/"
-    "1469298336095010931/banner_federal_1.png"
+    BRANDING_IMAGE_URL
 )
 PROMOTION_THUMBNAIL_URL = (
-    "https://cdn.discordapp.com/attachments/1417875005387309137/"
-    "1475920409709772951/Logo.png"
+    BRANDING_THUMBNAIL_URL
 )
 CENTRAL_REQUIRED_ROLE_ID = 1477331892448526456
 CENTRAL_TARGET_CHANNEL_ID = 1477320169914372168
@@ -187,7 +192,7 @@ class StaffCog(commands.Cog):
         embed.add_field(name="Reason:", value=reason or ".", inline=True)
         embed.set_thumbnail(url=PROMOTION_THUMBNAIL_URL)
         embed.set_image(url=PROMOTION_BANNER_URL)
-        embed.set_footer(text="Blackwater Protection Group", icon_url=PROMOTION_THUMBNAIL_URL)
+        embed.set_footer(text=BRANDING_FOOTER_TEXT, icon_url=BRANDING_FOOTER_ICON_URL)
 
         await self._publish_panel(
             interaction,
@@ -245,7 +250,7 @@ class StaffCog(commands.Cog):
         embed.add_field(name="Reason:", value=reason or ".", inline=True)
         embed.set_thumbnail(url=PROMOTION_THUMBNAIL_URL)
         embed.set_image(url=PROMOTION_BANNER_URL)
-        embed.set_footer(text="Blackwater Protection Group", icon_url=PROMOTION_THUMBNAIL_URL)
+        embed.set_footer(text=BRANDING_FOOTER_TEXT, icon_url=BRANDING_FOOTER_ICON_URL)
         await self._publish_panel(
             interaction,
             embed,
