@@ -7,7 +7,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from bot.branding import BRANDING_THUMBNAIL_URL
+from bot.branding import BRANDING_NAME, BRANDING_THUMBNAIL_URL
 
 
 def _as_int(name: str, default: int = 0) -> int:
@@ -195,7 +195,7 @@ class BotConfig:
         questions = [q.strip() for q in raw_questions.split("||") if q.strip()]
         if not questions:
             questions = [
-                "Why do you want to join Blackwater Protection Group staff?",
+                f"Why do you want to join {BRANDING_NAME} staff?",
                 "How would you handle a difficult player situation?",
                 "What timezone and hours can you be active?",
             ]

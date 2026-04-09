@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import sys
@@ -17,13 +18,14 @@ from aiohttp import web
 from bot.audit import AuditLogger, format_interaction_context
 from bot.config import BotConfig
 from bot.db import Database
+from bot.branding import BRANDING_NAME
 
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
-log = logging.getLogger("bpg-bot")
+log = logging.getLogger("oci-bot")
 BOT_LOCKDOWN_ROLE_ID = 1400844188840497171
 
 
@@ -46,7 +48,7 @@ def _acquire_single_instance_lock() -> int | None:
         port = os.getenv("PORT", "").strip() or "0"
         instance_name = f"{db_path}|{port}"
     digest = hashlib.sha1(instance_name.encode("utf-8")).hexdigest()
-    mutex_name = f"Local\\BPG_Blackwater_Protection_Group_{digest}"
+    mutex_name = f"Local\\OCI_Office_of_Community_Investigations_{digest}"
     handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
     if not handle:
         return None
@@ -71,7 +73,6 @@ class BPGBot(commands.Bot):
         self.bot_lockdown_enabled = False
         self.bot_lockdown_role_id = BOT_LOCKDOWN_ROLE_ID
         self.home_guild_id = config.dev_guild_id
-        self.global_ban_role_id = config.global_ban_role_id
 
     async def setup_hook(self) -> None:
         await self.db.init()
@@ -162,7 +163,7 @@ class BPGBot(commands.Bot):
             try:
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
-                        "This bot only accepts commands in the Blackwater Protection Group server. "
+                        f"This bot only accepts commands in the {BRANDING_NAME} server. "
                         "Use `/ping` in other servers.",
                         ephemeral=True,
                     )
@@ -197,6 +198,10 @@ class BPGBot(commands.Bot):
         )
         return value is not None
 
+    async def set_lockdown_enabled(self, enabled: bool) -> None:
+        self.bot_lockdown_enabled = enabled
+        await self.db.set_setting("bot_lockdown_enabled", "1" if enabled else "0")
+
     def build_status_payload(self, *, global_ban_count: int | None = None) -> dict[str, Any]:
         user = self.user
         home_guild = self.get_guild(self.home_guild_id) if self.home_guild_id else None
@@ -207,6 +212,7 @@ class BPGBot(commands.Bot):
             "service": "bpg-bot",
             "ready": self.is_ready(),
             "logged_in": user is not None,
+            "pid": os.getpid(),
             "user": {
                 "id": user.id,
                 "tag": str(user),
@@ -218,8 +224,8 @@ class BPGBot(commands.Bot):
             "uptime_seconds": uptime_seconds,
             "home_guild_id": self.home_guild_id,
             "home_guild_name": home_guild.name if home_guild is not None else None,
+            "lockdown_supported": True,
             "lockdown_enabled": self.bot_lockdown_enabled,
-            "global_ban_role_id": self.global_ban_role_id,
             "global_ban_count": global_ban_count,
         }
 
@@ -319,10 +325,36 @@ class BPGBot(commands.Bot):
             global_ban_count = int(global_ban_count_raw) if global_ban_count_raw is not None else 0
             return web.json_response(self.build_status_payload(global_ban_count=global_ban_count))
 
+        async def control_lockdown(request: web.Request) -> web.Response:
+            try:
+                payload = await request.json()
+            except Exception:
+                payload = {}
+
+            enabled_value = payload.get("enabled") if isinstance(payload, dict) else None
+            if isinstance(enabled_value, str):
+                enabled = enabled_value.strip().lower() in {"1", "true", "yes", "on"}
+            elif isinstance(enabled_value, bool):
+                enabled = enabled_value
+            elif isinstance(enabled_value, int):
+                enabled = enabled_value != 0
+            else:
+                return web.json_response({"ok": False, "message": "Missing enabled value."}, status=400)
+
+            await self.set_lockdown_enabled(enabled)
+            return web.json_response(
+                {
+                    "ok": True,
+                    "message": "Lockdown updated.",
+                    "lockdown_enabled": self.bot_lockdown_enabled,
+                }
+            )
+
         app = web.Application()
         app.router.add_get("/", status)
         app.router.add_get("/healthz", status)
         app.router.add_get("/status", status)
+        app.router.add_post("/control/lockdown", control_lockdown)
 
         self._web_runner = web.AppRunner(app)
         await self._web_runner.setup()

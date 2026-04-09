@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import sys
+import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,8 +15,10 @@ from typing import Any
 
 from aiohttp import ClientSession, ClientTimeout, web
 from dotenv import dotenv_values, load_dotenv
+import psutil
 
 from bot.branding import (
+    BRANDING_NAME,
     BRANDING_FOOTER_ICON_URL,
     BRANDING_FOOTER_TEXT,
     BRANDING_THUMBNAIL_URL,
@@ -26,7 +29,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
-log = logging.getLogger("bpg-dashboard")
+log = logging.getLogger("oci-dashboard")
 
 ROOT = Path(__file__).resolve().parent
 LOG_DIR = ROOT / "logs"
@@ -40,6 +43,7 @@ class SlotDefinition:
     env_file: str
     status_port: int
     database_path: str
+    supports_lockdown: bool = True
     entrypoint: str = "main.py"
 
     @property
@@ -85,6 +89,7 @@ def load_slot_definitions() -> list[SlotDefinition]:
             env_file=".env",
             status_port=_env_int("BOT_STATUS_PORT_PRIMARY", 8091),
             database_path="data/bot.db",
+            supports_lockdown=True,
         ),
         SlotDefinition(
             id="secondary",
@@ -92,6 +97,8 @@ def load_slot_definitions() -> list[SlotDefinition]:
             env_file=".env.secondary",
             status_port=_env_int("BOT_STATUS_PORT_SECONDARY", 8092),
             database_path="data/bot-2.db",
+            supports_lockdown=False,
+            entrypoint="secondary_bot/main.py",
         ),
     ]
 
@@ -120,6 +127,7 @@ def load_slot_definitions() -> list[SlotDefinition]:
             env_file=".env",
             status_port=8100 + index,
             database_path=f"data/slot-{index}.db",
+            entrypoint="secondary_bot/main.py" if index == 2 else "main.py",
         )
         if not isinstance(item, dict):
             parsed.append(fallback)
@@ -129,6 +137,7 @@ def load_slot_definitions() -> list[SlotDefinition]:
         raw_name = str(item.get("name", fallback.name)).strip()
         raw_env = str(item.get("env_file", fallback.env_file)).strip()
         raw_db = str(item.get("database_path", fallback.database_path)).strip()
+        raw_supports_lockdown = _coerce_bool(item.get("supports_lockdown", fallback.supports_lockdown), fallback.supports_lockdown)
         raw_entrypoint = str(item.get("entrypoint", fallback.entrypoint)).strip()
         try:
             raw_port = int(item.get("status_port", fallback.status_port))
@@ -141,6 +150,7 @@ def load_slot_definitions() -> list[SlotDefinition]:
                 env_file=raw_env or fallback.env_file,
                 status_port=raw_port,
                 database_path=raw_db or fallback.database_path,
+                supports_lockdown=raw_supports_lockdown,
                 entrypoint=raw_entrypoint or fallback.entrypoint,
             )
         )
@@ -170,6 +180,20 @@ def _env_int(name: str, default: int) -> int:
         return int(raw)
     except ValueError:
         return default
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
 
 
 def _resolve_python_executable() -> Path:
@@ -332,6 +356,9 @@ def _render_dashboard_html(
     selected_slot_name = html.escape(selected_slot.name)
     selected_slot_id = html.escape(selected_slot.id)
     selected_status_port = html.escape(f"127.0.0.1:{selected_slot.status_port}")
+    selected_supports_lockdown = selected_slot.supports_lockdown
+    lockdown_setting_style = "" if selected_supports_lockdown else ' style="display:none;"'
+    lockdown_stat_style = "" if selected_supports_lockdown else ' style="display:none;"'
     slot_cards_html = _render_slot_overview_cards(slots, selected_slot.id, slot_snapshots)
 
     return f"""<!doctype html>
@@ -340,7 +367,7 @@ def _render_dashboard_html(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#08111f">
-  <title>Blackwater Protection Group Dashboard</title>
+  <title>Office of Community Investigations - OCI Dashboard</title>
   <style>
     :root {{
       color-scheme: dark;
@@ -503,6 +530,12 @@ def _render_dashboard_html(
       margin-top: 18px;
     }}
 
+    .ops-grid {{
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }}
+
     .card {{
       background: var(--card);
       border: 1px solid var(--line);
@@ -551,6 +584,132 @@ def _render_dashboard_html(
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 12px;
+    }}
+
+    .dashboard-shell {{
+      display: grid;
+      grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+      gap: 18px;
+      margin-top: 18px;
+      align-items: start;
+    }}
+
+    .sidebar {{
+      display: grid;
+      gap: 18px;
+      align-content: start;
+    }}
+
+    .content-stack {{
+      display: grid;
+      gap: 18px;
+      min-width: 0;
+    }}
+
+    .settings-grid {{
+      display: grid;
+      gap: 12px;
+    }}
+
+    .setting-block {{
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      display: grid;
+      gap: 10px;
+    }}
+
+    .setting-head {{
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }}
+
+    .setting-title {{
+      font-size: 1rem;
+      font-weight: 700;
+    }}
+
+    .setting-desc {{
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.45;
+    }}
+
+    .setting-status {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+      font-size: 0.84rem;
+      font-weight: 700;
+      width: fit-content;
+    }}
+
+    .setting-status::before {{
+      content: "";
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--warn);
+      box-shadow: 0 0 12px currentColor;
+    }}
+
+    .setting-status.ok {{
+      color: var(--accent-2);
+    }}
+
+    .setting-status.ok::before {{
+      background: var(--accent-2);
+    }}
+
+    .setting-status.offline {{
+      color: var(--danger);
+    }}
+
+    .setting-status.offline::before {{
+      background: var(--danger);
+    }}
+
+    .setting-actions {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }}
+
+    .setting-actions button {{
+      padding: 10px 14px;
+      border-radius: 12px;
+      box-shadow: none;
+    }}
+
+    .kv-list {{
+      display: grid;
+      gap: 10px;
+    }}
+
+    .kv-list div {{
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }}
+
+    .kv-list span {{
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }}
+
+    .kv-list strong {{
+      color: var(--text);
+      font-weight: 600;
+      text-align: right;
+      overflow-wrap: anywhere;
     }}
 
     .slot-overview {{
@@ -764,10 +923,12 @@ def _render_dashboard_html(
         justify-content: flex-start;
       }}
 
+      .dashboard-shell,
       .grid,
       .split,
       .stats,
-      .slot-grid {{
+      .slot-grid,
+      .ops-grid {{
         grid-template-columns: 1fr;
       }}
     }}
@@ -776,10 +937,10 @@ def _render_dashboard_html(
 <body>
   <main class="wrap">
     <section class="hero">
-      <img class="brand-mark" src="{brand_thumb}" alt="Blackwater Protection Group logo">
+      <img class="brand-mark" src="{brand_thumb}" alt="{BRANDING_NAME} logo">
       <div>
         <div class="eyebrow">Local control panel</div>
-        <h1>Blackwater Protection Group</h1>
+        <h1>{BRANDING_NAME}</h1>
         <div class="subtitle">
           Multi-slot dashboard for starting, stopping, and restarting local bot processes.
           This view is focused on <span class="muted">{selected_slot_name}</span>, whose status endpoint is exposed on
@@ -809,6 +970,43 @@ def _render_dashboard_html(
       </div>
     </section>
 
+    <section class="dashboard-shell">
+      <aside class="sidebar">
+        <article class="card">
+          <h2>Bot Settings</h2>
+          <div class="settings-grid">
+            <div class="setting-block" id="lockdown_setting_block"{lockdown_setting_style}>
+              <div class="setting-head">
+                <div>
+                  <div class="setting-title">Lockdown</div>
+                  <div class="setting-desc">Enable or disable command access for the selected bot slot.</div>
+                </div>
+                <div class="setting-status offline" id="lockdown_state">Loading...</div>
+              </div>
+              <div class="setting-actions">
+                <button class="start" data-setting-action="lockdown-on">Enable</button>
+                <button class="stop" data-setting-action="lockdown-off">Disable</button>
+              </div>
+            </div>
+            <div class="setting-block">
+              <div class="setting-head">
+                <div>
+                  <div class="setting-title">Selected Slot</div>
+                  <div class="setting-desc">Live configuration for the bot process under this panel.</div>
+                </div>
+              </div>
+              <div class="kv-list">
+                <div><span>Name</span><strong id="selected_slot_name">{selected_slot_name}</strong></div>
+                <div><span>Status Port</span><strong id="selected_status_port">{selected_status_port}</strong></div>
+                <div><span>Database</span><strong id="selected_database_path">—</strong></div>
+                <div><span>Env File</span><strong id="selected_env_file">—</strong></div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </aside>
+
+      <div class="content-stack">
     <section class="grid">
       <article class="card">
         <h2>Bot Status</h2>
@@ -850,16 +1048,12 @@ def _render_dashboard_html(
 
       <article class="card">
         <h2>Operations</h2>
-        <div class="split">
+        <div class="ops-grid">
           <div class="stat">
             <div class="label">Home Guild</div>
             <div class="value" id="home_guild">&mdash;</div>
           </div>
-          <div class="stat">
-            <div class="label">Global Ban Role</div>
-            <div class="value" id="global_ban_role">&mdash;</div>
-          </div>
-          <div class="stat">
+          <div class="stat" id="lockdown_stat"{lockdown_stat_style}>
             <div class="label">Lockdown</div>
             <div class="value" id="lockdown">&mdash;</div>
           </div>
@@ -876,7 +1070,7 @@ def _render_dashboard_html(
           </div>
           <div>
             <img src="{footer_icon}" alt="Footer icon">
-            <span>Property Of Blackwater</span>
+            <span>Property Of {BRANDING_NAME}</span>
           </div>
         </div>
       </article>
@@ -898,11 +1092,15 @@ def _render_dashboard_html(
         <div class="log-box"><pre id="stderr_log">Waiting for data...</pre></div>
       </article>
     </section>
+      </div>
+    </section>
   </main>
 
   <script>
     const buttons = Array.from(document.querySelectorAll("button[data-action]"));
+    const settingButtons = Array.from(document.querySelectorAll("button[data-setting-action]"));
     const selectedSlotId = "{selected_slot_id}";
+    const selectedSupportsLockdown = {str(selected_supports_lockdown).lower()};
     const statusFields = {{
       process_state: document.getElementById("process_state"),
       bot_state: document.getElementById("bot_state"),
@@ -913,9 +1111,15 @@ def _render_dashboard_html(
       latency: document.getElementById("latency"),
       uptime: document.getElementById("uptime"),
       home_guild: document.getElementById("home_guild"),
-      global_ban_role: document.getElementById("global_ban_role"),
       lockdown: document.getElementById("lockdown"),
       global_ban_count: document.getElementById("global_ban_count"),
+      lockdown_setting_block: document.getElementById("lockdown_setting_block"),
+      lockdown_stat: document.getElementById("lockdown_stat"),
+      lockdown_state: document.getElementById("lockdown_state"),
+      selected_slot_name: document.getElementById("selected_slot_name"),
+      selected_status_port: document.getElementById("selected_status_port"),
+      selected_database_path: document.getElementById("selected_database_path"),
+      selected_env_file: document.getElementById("selected_env_file"),
       stdout_log: document.getElementById("stdout_log"),
       stderr_log: document.getElementById("stderr_log"),
     }};
@@ -955,6 +1159,21 @@ def _render_dashboard_html(
       alert(data.message || "Action completed.");
     }}
 
+    async function postLockdown(enabled) {{
+      const response = await fetch(`/api/slots/${{selectedSlotId}}/lockdown`, {{
+        method: "POST",
+        headers: {{
+          "Content-Type": "application/json",
+        }},
+        body: JSON.stringify({{
+          enabled,
+        }}),
+      }});
+      const data = await response.json();
+      await refresh();
+      alert(data.message || "Lockdown updated.");
+    }}
+
     async function refresh() {{
       try {{
         const response = await fetch(`/api/slots/${{selectedSlotId}}/status`, {{ cache: "no-store" }});
@@ -969,6 +1188,8 @@ def _render_dashboard_html(
           : !slotInfo.env_exists
             ? "Env missing"
             : null;
+        const lockdownSupported = Boolean(botStatus?.lockdown_supported ?? slotInfo.supports_lockdown ?? selectedSupportsLockdown);
+        const lockdownEnabled = Boolean(botStatus?.lockdown_enabled);
 
         if (running) {{
           setStatusPill("ok", managed ? "Bot running" : "Bot reachable");
@@ -978,7 +1199,7 @@ def _render_dashboard_html(
 
         statusFields.process_state.textContent = slotIssue || (managed ? "Managed by dashboard" : (running ? "External or detached" : "Stopped"));
         statusFields.bot_state.textContent = botStatus ? (botStatus.ready ? "Online" : "Starting") : "Offline";
-        statusFields.pid.textContent = data.pid ?? "—";
+        statusFields.pid.textContent = data.pid ?? botStatus?.pid ?? "—";
         statusFields.return_code.textContent = data.returncode ?? "—";
         statusFields.bot_user.textContent = formatUser(botStatus?.user ?? null);
         statusFields.guild_count.textContent = botStatus?.guild_count ?? "—";
@@ -991,8 +1212,22 @@ def _render_dashboard_html(
         statusFields.home_guild.textContent = botStatus?.home_guild_name
           ? `${{botStatus.home_guild_name}} (${{botStatus.home_guild_id}})`
           : "—";
-        statusFields.global_ban_role.textContent = botStatus?.global_ban_role_id ?? "—";
-        statusFields.lockdown.textContent = formatBool(botStatus?.lockdown_enabled);
+        if (statusFields.lockdown_setting_block) {{
+          statusFields.lockdown_setting_block.style.display = lockdownSupported ? "" : "none";
+        }}
+        if (statusFields.lockdown_stat) {{
+          statusFields.lockdown_stat.style.display = lockdownSupported ? "" : "none";
+        }}
+        statusFields.lockdown.textContent = lockdownSupported ? formatBool(lockdownEnabled) : "N/A";
+        statusFields.lockdown_state.textContent = lockdownSupported ? (lockdownEnabled ? "Enabled" : "Disabled") : "Not available";
+        statusFields.lockdown_state.classList.toggle("ok", lockdownSupported && lockdownEnabled);
+        statusFields.lockdown_state.classList.toggle("offline", !lockdownSupported || !lockdownEnabled);
+        statusFields.selected_slot_name.textContent = slotInfo.name || selectedSlotId;
+        statusFields.selected_status_port.textContent = slotInfo.status_port
+          ? `127.0.0.1:${{slotInfo.status_port}}`
+          : "—";
+        statusFields.selected_database_path.textContent = slotInfo.database_path || "—";
+        statusFields.selected_env_file.textContent = slotInfo.env_file || "—";
         statusFields.global_ban_count.textContent = botStatus?.global_ban_count ?? "—";
         statusFields.stdout_log.textContent = data.stdout_tail || "No stdout captured yet.";
         statusFields.stderr_log.textContent = data.stderr_tail || "No stderr captured yet.";
@@ -1002,10 +1237,19 @@ def _render_dashboard_html(
             button.disabled = running || Boolean(slotIssue);
           }}
           if (button.dataset.action === "stop") {{
-            button.disabled = !managed;
+            button.disabled = !running;
           }}
           if (button.dataset.action === "restart") {{
-            button.disabled = !managed;
+            button.disabled = !running;
+          }}
+        }});
+
+        settingButtons.forEach((button) => {{
+          if (button.dataset.settingAction === "lockdown-on") {{
+            button.disabled = !lockdownSupported || lockdownEnabled;
+          }}
+          if (button.dataset.settingAction === "lockdown-off") {{
+            button.disabled = !lockdownSupported || !lockdownEnabled;
           }}
         }});
       }} catch (error) {{
@@ -1022,6 +1266,21 @@ def _render_dashboard_html(
         button.disabled = true;
         try {{
           await postAction(button.dataset.action);
+        }} finally {{
+          await refresh();
+        }}
+      }});
+    }});
+
+    settingButtons.forEach((button) => {{
+      button.addEventListener("click", async () => {{
+        button.disabled = true;
+        try {{
+          if (button.dataset.settingAction === "lockdown-on") {{
+            await postLockdown(true);
+          }} else if (button.dataset.settingAction === "lockdown-off") {{
+            await postLockdown(false);
+          }}
         }} finally {{
           await refresh();
         }}
@@ -1096,6 +1355,86 @@ class BotProcessController:
         except Exception:
             return None
 
+    def _bot_status_pid(self, bot_status: dict[str, Any] | None) -> int | None:
+        if not bot_status:
+            return None
+        raw_pid = bot_status.get("pid")
+        try:
+            return int(raw_pid)
+        except (TypeError, ValueError):
+            return None
+
+    async def _wait_for_shutdown(self, timeout_seconds: float = 20.0) -> bool:
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            if await self._fetch_bot_status() is None:
+                return True
+            await asyncio.sleep(0.5)
+        return await self._fetch_bot_status() is None
+
+    async def _terminate_external_process(self, pid: int) -> tuple[bool, str]:
+        def _terminate_tree() -> tuple[bool, str]:
+            try:
+                proc = psutil.Process(pid)
+            except psutil.NoSuchProcess:
+                return True, f"{self.slot.name} is already stopped."
+            except psutil.Error as exc:
+                return False, f"Unable to access {self.slot.name} process {pid}: {exc}"
+
+            targets = [proc]
+            try:
+                targets.extend(proc.children(recursive=True))
+            except psutil.Error:
+                pass
+
+            for target in targets:
+                try:
+                    target.terminate()
+                except psutil.Error:
+                    pass
+
+            try:
+                _, alive = psutil.wait_procs(targets, timeout=10)
+            except psutil.Error as exc:
+                return False, f"Failed waiting for {self.slot.name} to exit: {exc}"
+
+            for target in alive:
+                try:
+                    target.kill()
+                except psutil.Error:
+                    pass
+
+            if alive:
+                try:
+                    psutil.wait_procs(alive, timeout=5)
+                except psutil.Error:
+                    pass
+
+            return True, f"Stopped {self.slot.name} process {pid}."
+
+        return await asyncio.to_thread(_terminate_tree)
+
+    async def set_lockdown(self, enabled: bool) -> tuple[bool, str]:
+        async with self._lock:
+            if not self.slot.supports_lockdown:
+                return False, f"Lockdown is not available for {self.slot.name}."
+            bot_status = await self._fetch_bot_status()
+            if bot_status is None:
+                return False, f"{self.slot.name} is not reachable."
+
+        timeout = ClientTimeout(total=5)
+        url = f"http://127.0.0.1:{self.status_port}/control/lockdown"
+        try:
+            async with ClientSession(timeout=timeout) as session:
+                async with session.post(url, json={"enabled": enabled}) as response:
+                    data = await response.json(content_type=None)
+                    if response.status != 200 or not data.get("ok"):
+                        return False, data.get("message", "Failed to update lockdown.")
+                    state_text = "enabled" if data.get("lockdown_enabled") else "disabled"
+                    return True, f"Lockdown {state_text} for {self.slot.name}."
+        except Exception:
+            return False, f"Failed to update lockdown for {self.slot.name}."
+
     async def start(self) -> tuple[bool, str]:
         async with self._lock:
             await self._prune_finished_process()
@@ -1140,9 +1479,20 @@ class BotProcessController:
         async with self._lock:
             await self._prune_finished_process()
             if not self._is_managed_running():
-                if await self._fetch_bot_status() is not None:
-                    return False, f"{self.slot.name} is reachable on the status port, but this dashboard did not launch it."
-                return False, f"{self.slot.name} is not running."
+                bot_status = await self._fetch_bot_status()
+                if bot_status is None:
+                    return False, f"{self.slot.name} is not running."
+
+                external_pid = self._bot_status_pid(bot_status)
+                if external_pid is None:
+                    return False, f"{self.slot.name} is reachable on the status port, but its process id is unavailable."
+
+                stopped, message = await self._terminate_external_process(external_pid)
+                if not stopped:
+                    return False, message
+                if not await self._wait_for_shutdown():
+                    return False, f"Stopped {self.slot.name}, but it is still reachable on the status port."
+                return True, message
 
             assert self.process is not None
             self.process.terminate()
@@ -1155,6 +1505,8 @@ class BotProcessController:
             pid = self.process.pid
             self._close_log_handles()
             self.process = None
+            if not await self._wait_for_shutdown():
+                return False, f"Stopped {self.slot.name} process {pid}, but it is still reachable on the status port."
             return True, f"Stopped {self.slot.name} process {pid}."
 
     async def restart(self) -> tuple[bool, str]:
@@ -1165,7 +1517,13 @@ class BotProcessController:
         if not managed_running:
             bot_status = await self._fetch_bot_status()
             if bot_status is not None:
-                return False, f"{self.slot.name} is reachable on the status port, but this dashboard did not launch it."
+                stopped, stop_message = await self.stop()
+                if not stopped:
+                    return False, stop_message
+                started, start_message = await self.start()
+                if started:
+                    return True, f"{stop_message} {start_message}"
+                return False, start_message
             started, start_message = await self.start()
             return started, start_message
 
@@ -1185,12 +1543,14 @@ class BotProcessController:
 
         bot_status = await self._fetch_bot_status()
         running = managed_running or bot_status is not None
+        bot_status_pid = self._bot_status_pid(bot_status)
         return {
             "slot": {
                 "id": self.slot.id,
                 "name": self.slot.name,
                 "status_port": self.slot.status_port,
                 "database_path": self.slot.database_path,
+                "supports_lockdown": self.slot.supports_lockdown,
                 "entrypoint": _format_path(str(self.slot.entrypoint_path)),
                 "env_file": _format_path(str(self.slot.env_path)),
                 "env_exists": self.slot.env_path.exists(),
@@ -1198,7 +1558,7 @@ class BotProcessController:
             },
             "running": running,
             "managed": managed_running,
-            "pid": process.pid if managed_running and process is not None else None,
+            "pid": process.pid if managed_running and process is not None else bot_status_pid,
             "returncode": process.returncode if process is not None else None,
             "bot_status": bot_status,
             "stdout_tail": _tail_file(self.stdout_log),
@@ -1239,6 +1599,9 @@ class DashboardManager:
 
     async def restart(self, slot_id: str | None) -> tuple[bool, str]:
         return await self.controller_for(slot_id).restart()
+
+    async def set_lockdown(self, slot_id: str | None, enabled: bool) -> tuple[bool, str]:
+        return await self.controller_for(slot_id).set_lockdown(enabled)
 
 
 def create_app() -> web.Application:
@@ -1295,6 +1658,25 @@ def create_app() -> web.Application:
         ok, message = await manager.restart(_slot_id_from_request(request))
         return web.json_response({"ok": ok, "message": message})
 
+    async def api_lockdown(request: web.Request) -> web.Response:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        enabled_value = payload.get("enabled") if isinstance(payload, dict) else None
+        if isinstance(enabled_value, str):
+            enabled = enabled_value.strip().lower() in {"1", "true", "yes", "on"}
+        elif isinstance(enabled_value, bool):
+            enabled = enabled_value
+        elif isinstance(enabled_value, int):
+            enabled = enabled_value != 0
+        else:
+            return web.json_response({"ok": False, "message": "Missing enabled value."}, status=400)
+
+        ok, message = await manager.set_lockdown(_slot_id_from_request(request), enabled)
+        return web.json_response({"ok": ok, "message": message, "lockdown_enabled": enabled})
+
     app = web.Application()
     app["manager"] = manager
     app.router.add_get("/", dashboard)
@@ -1304,10 +1686,12 @@ def create_app() -> web.Application:
     app.router.add_post("/api/slots/{slot_id}/start", api_start)
     app.router.add_post("/api/slots/{slot_id}/stop", api_stop)
     app.router.add_post("/api/slots/{slot_id}/restart", api_restart)
+    app.router.add_post("/api/slots/{slot_id}/lockdown", api_lockdown)
     app.router.add_get("/api/status", api_status)
     app.router.add_post("/api/start", api_start)
     app.router.add_post("/api/stop", api_stop)
     app.router.add_post("/api/restart", api_restart)
+    app.router.add_post("/api/lockdown", api_lockdown)
     return app
 
 

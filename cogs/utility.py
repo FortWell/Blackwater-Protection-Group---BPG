@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import os
 import time
 
 import aiohttp
@@ -10,12 +11,14 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.branding import (
+    BRANDING_NAME,
     BRANDING_FOOTER_ICON_URL,
     BRANDING_FOOTER_TEXT,
     BRANDING_IMAGE_URL,
     BRANDING_THUMBNAIL_URL,
 )
 
+HOME_GUILD_ID = int(os.getenv("DEV_GUILD_ID", "0").strip() or 0)
 LOCKDOWN_ROLE_ID = 1400844188840497171
 OPORATION_BLITZ_ROLE_ID = 1478860250869399733
 OPORATION_BLITZ_WEBHOOK_URL = (
@@ -35,9 +38,20 @@ def _format_uptime(seconds: int) -> str:
     return f"{minutes}m {secs}s"
 
 
+def _home_guild_only() -> callable:
+    if HOME_GUILD_ID:
+        return app_commands.guilds(HOME_GUILD_ID)
+    return lambda obj: obj
+
+
 class UtilityCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    def _dashboard_url(self) -> str:
+        host = os.getenv("DASHBOARD_HOST", "127.0.0.1").strip() or "127.0.0.1"
+        port = os.getenv("DASHBOARD_PORT", "8080").strip() or "8080"
+        return f"http://{host}:{port}"
 
     def _has_lockdown_control(self, interaction: discord.Interaction) -> bool:
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
@@ -76,6 +90,32 @@ class UtilityCog(commands.Cog):
         embed.set_footer(text=BRANDING_FOOTER_TEXT, icon_url=BRANDING_FOOTER_ICON_URL)
 
         await interaction.followup.send(embed=embed)
+
+    @app_commands.command(
+        name="dashboard",
+        description="Show the local Office of Community Investigations - OCI dashboard link.",
+    )
+    @_home_guild_only()
+    async def dashboard(self, interaction: discord.Interaction) -> None:
+        dashboard_url = self._dashboard_url()
+
+        embed = discord.Embed(
+            title=f"{BRANDING_NAME} Dashboard",
+            description=(
+                f"Open the local control panel here:\n`{dashboard_url}`\n\n"
+                "If it is not already running, start it with `python dashboard.py`."
+            ),
+            color=0x0B1E3D,
+            timestamp=datetime.datetime.now(datetime.UTC),
+        )
+        embed.set_thumbnail(url=BRANDING_THUMBNAIL_URL)
+        embed.set_image(url=BRANDING_IMAGE_URL)
+        embed.set_footer(text=BRANDING_FOOTER_TEXT, icon_url=BRANDING_FOOTER_ICON_URL)
+
+        view = discord.ui.View()
+        view.add_item(discord.ui.Button(label="Open Dashboard", url=dashboard_url))
+
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @app_commands.command(
         name="bot-lockdown",
@@ -172,11 +212,11 @@ class UtilityCog(commands.Cog):
             "Hello @here,\n\n"
             "The server was not raided.\n"
             f"Clarification: The reason provided was: {reasson}\n\n"
-            "As stated in the Blackwater Protection Group bot policy, all bot assets such as embeds and related content "
-            "are property of Blackwater Protection Group only.\n"
-            "The Blackwater Protection Group bot assets are only permitted to be used by authorized servers while "
-            "Blackwater Protection Group consents and is present in the server using them.\n\n"
-            "For more information please contact Blackwater Protection Group staff."
+            f"As stated in the {BRANDING_NAME} bot policy, all bot assets such as embeds and related content "
+            f"are property of {BRANDING_NAME} only.\n"
+            f"The {BRANDING_NAME} bot assets are only permitted to be used by authorized servers while "
+            f"{BRANDING_NAME} consents and is present in the server using them.\n\n"
+            f"For more information please contact {BRANDING_NAME} staff."
         )
 
         webhook_ok = True
@@ -185,7 +225,7 @@ class UtilityCog(commands.Cog):
                 webhook = discord.Webhook.from_url(OPORATION_BLITZ_WEBHOOK_URL, session=session)
                 await webhook.send(
                     content=webhook_text,
-                    username="Blackwater Protection Group Systems",
+                    username=f"{BRANDING_NAME} Systems",
                     allowed_mentions=discord.AllowedMentions(everyone=True, users=False, roles=False),
                     wait=False,
                 )

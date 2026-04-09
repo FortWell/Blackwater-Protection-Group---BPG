@@ -13,6 +13,7 @@ from discord.ext import commands
 
 from bot.embed_utils import apply_embed_template
 from bot.branding import (
+    BRANDING_NAME,
     BRANDING_FOOTER_ICON_URL,
     BRANDING_FOOTER_TEXT,
     BRANDING_IMAGE_URL,
@@ -110,6 +111,10 @@ def _support_role_for_type(cfg, ticket_type_key: str) -> int:
     return 0
 
 
+def _ticket_panel_mode(cfg) -> str:
+    return str(getattr(cfg, "ticket_panel_mode", "") or "").strip().casefold()
+
+
 def _application_owner_for_topic(data: dict[str, str]) -> int | None:
     return _topic_value_int(data, "application-ticket")
 
@@ -168,11 +173,16 @@ def _ticket_info_embed(
     roblox_info: dict[str, Any] | None,
     roblox_error: str | None,
     extra_fields: list[tuple[str, str]] | None = None,
+    *,
+    include_roblox_info: bool = True,
+    title_override: str | None = None,
+    description_override: str | None = None,
 ) -> discord.Embed:
     created_date = member.created_at.astimezone(timezone.utc).strftime("%d/%m/%Y")
     embed = discord.Embed(
-        title=f"{ticket_type.label} support",
-        description=(
+        title=title_override or f"{ticket_type.label} support",
+        description=description_override
+        or (
             f"Thank you for creating a {ticket_type.label.lower()} ticket. "
             "Our team will be with you shortly. In the meantime, ensure you've supplied "
             "our team with the essential items to assist you furthermore. Please patiently "
@@ -190,17 +200,18 @@ def _ticket_info_embed(
         ),
         inline=False,
     )
-    embed.add_field(
-        name="Roblox Information",
-        value=(
-            f"- **Roblox Username:** {roblox_info['username'] if roblox_info else 'Not provided'}\n"
-            f"- **Roblox ID:** {roblox_info['id'] if roblox_info else 'Not provided'}\n"
-            f"- **Roblox Profile:** "
-            f"{roblox_info['profile_url'] if roblox_info else (roblox_error or 'Not provided')}\n"
-            f"- **Creation Date:** {roblox_info['created'] if roblox_info else (roblox_error or 'Not provided')}"
-        ),
-        inline=False,
-    )
+    if include_roblox_info:
+        embed.add_field(
+            name="Roblox Information",
+            value=(
+                f"- **Roblox Username:** {roblox_info['username'] if roblox_info else 'Not provided'}\n"
+                f"- **Roblox ID:** {roblox_info['id'] if roblox_info else 'Not provided'}\n"
+                f"- **Roblox Profile:** "
+                f"{roblox_info['profile_url'] if roblox_info else (roblox_error or 'Not provided')}\n"
+                f"- **Creation Date:** {roblox_info['created'] if roblox_info else (roblox_error or 'Not provided')}"
+            ),
+            inline=False,
+        )
     if extra_fields:
         for name, value in extra_fields:
             if name and value:
@@ -303,7 +314,7 @@ def _message_to_text_line(msg: discord.Message) -> str:
 
 async def _build_transcript_text(channel: discord.TextChannel) -> str:
     header = [
-        "Blackwater Protection Group Ticket Transcript",
+        f"{BRANDING_NAME} Ticket Transcript",
         f"Guild: {channel.guild.name} ({channel.guild.id})",
         f"Channel: #{channel.name} ({channel.id})",
         f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
@@ -334,7 +345,7 @@ async def _send_ticket_transcript(
                 await webhook.send(
                     content=f"Ticket transcript for <#{channel.id}>",
                     file=discord.File(io.BytesIO(data_bytes), filename=filename),
-                    username="Ticket Transcript",
+                    username=f"{BRANDING_NAME} Ticket Transcript",
                     wait=False,
                 )
         except Exception:
@@ -413,6 +424,10 @@ async def _create_ticket_from_modal(
     roblox_username: str = "",
     reason_title: str = "What is the reason for the ticket?",
     extra_fields: list[tuple[str, str]] | None = None,
+    include_roblox_info: bool = True,
+    title_override: str | None = None,
+    description_override: str | None = None,
+    followup_message: str | None = None,
 ) -> None:
     try:
         if not interaction.response.is_done():
@@ -508,12 +523,20 @@ async def _create_ticket_from_modal(
             roblox_info=roblox_info,
             roblox_error=roblox_error,
             extra_fields=extra_fields,
+            include_roblox_info=include_roblox_info,
+            title_override=title_override,
+            description_override=description_override,
         )
     )
     await ticket_channel.send(embed=_ticket_reason_embed(cfg, reason, title=reason_title))
     await ticket_channel.send(view=TicketActionsView())
+    followup_text = (
+        followup_message.format(ticket_channel=ticket_channel.mention, ticket_type=ticket_type.label)
+        if followup_message
+        else f"{ticket_type.label} ticket created: {ticket_channel.mention}"
+    )
     await interaction.followup.send(
-        f"{ticket_type.label} ticket created: {ticket_channel.mention}",
+        followup_text,
         ephemeral=True,
     )
 
@@ -583,6 +606,73 @@ class PriorityTicketReasonModal(discord.ui.Modal, title="Priority Support Ticket
             reason_title="Priority Support Request",
             extra_fields=extra_fields,
         )
+
+
+class CaseReportModal(discord.ui.Modal, title="Submit a Case Report"):
+    report_subject = discord.ui.TextInput(
+        label="Server/User Name",
+        placeholder="Enter the server or user name",
+        style=discord.TextStyle.short,
+        required=True,
+        max_length=100,
+    )
+    report_reason = discord.ui.TextInput(
+        label="Reason for report",
+        placeholder="Please explain why you are reporting this.",
+        style=discord.TextStyle.paragraph,
+        required=True,
+        max_length=900,
+    )
+    report_evidence = discord.ui.TextInput(
+        label="Evidence",
+        placeholder="Screenshots, links, etc.",
+        style=discord.TextStyle.paragraph,
+        required=True,
+        max_length=900,
+    )
+
+    def __init__(self, ticket_type: TicketType):
+        super().__init__(timeout=300)
+        self.ticket_type = ticket_type
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        extra_fields = [
+            ("Server/User Name", str(self.report_subject)),
+            ("Evidence", str(self.report_evidence)),
+        ]
+        await _create_ticket_from_modal(
+            interaction,
+            self.ticket_type,
+            reason=str(self.report_reason),
+            reason_title="Reason for report",
+            extra_fields=extra_fields,
+            include_roblox_info=False,
+            title_override="Case Report",
+            description_override=(
+                "Thank you for submitting a case report. "
+                "Our team will review the report shortly."
+            ),
+            followup_message="Case report created: {ticket_channel}",
+        )
+
+
+class CaseReportPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Open Case",
+        style=discord.ButtonStyle.primary,
+        emoji="📩",
+        custom_id="ticket:create:case_report",
+    )
+    async def open_case(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        cfg = interaction.client.config
+        ticket_type = _ticket_types(cfg).get("general")
+        if ticket_type is None:
+            await interaction.response.send_message("Case report tickets are not configured.", ephemeral=True)
+            return
+        await interaction.response.send_modal(CaseReportModal(ticket_type))
 
 
 async def _claim_ticket(interaction: discord.Interaction) -> None:
@@ -749,6 +839,7 @@ class TicketsCog(commands.Cog):
             cfg.ticket_security_support_role_id,
             cfg.ticket_general_support_role_id,
             cfg.ticket_priority_support_role_id,
+            getattr(cfg, "ticket_role_perms_id", 0),
         }
         role_ids = {rid for rid in role_ids if rid}
         if not role_ids:
@@ -768,6 +859,43 @@ class TicketsCog(commands.Cog):
             return
         if not isinstance(interaction.channel, discord.TextChannel):
             await interaction.response.send_message("Use this in a text channel.", ephemeral=True)
+            return
+
+        if _ticket_panel_mode(self.bot.config) == "case_report":
+            panel_title = "Submit a Case Report"
+            embed = discord.Embed(
+                title=panel_title,
+                description=(
+                    "If you wish to report a server or user, please open a ticket.\n\n"
+                    "Include:\n"
+                    "• Server/User Name\n"
+                    "• Reason for report\n"
+                    "• Evidence (screenshots, links, etc.)\n\n"
+                    "False reports may result in action."
+                ),
+                color=0x0B1E3D,
+            )
+            apply_embed_template(
+                embed,
+                self.bot.config.embed_templates.get("ticket_panel"),
+            )
+            _apply_branding(embed)
+
+            async for msg in interaction.channel.history(limit=30):
+                if msg.author.id != self.bot.user.id:
+                    continue
+                if not msg.embeds:
+                    continue
+                first = msg.embeds[0]
+                if first.title == panel_title and msg.components:
+                    await interaction.response.send_message(
+                        f"Ticket panel already exists: {msg.jump_url}",
+                        ephemeral=True,
+                    )
+                    return
+
+            await interaction.channel.send(embed=embed, view=CaseReportPanelView())
+            await interaction.response.send_message("Ticket panel sent.", ephemeral=True)
             return
 
         embed = discord.Embed(

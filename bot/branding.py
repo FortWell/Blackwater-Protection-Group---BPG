@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+BRANDING_NAME = "Office of Community Investigations - OCI"
+
 BRANDING_THUMBNAIL_URL = (
     "https://cdn.discordapp.com/attachments/1400844192833474562/"
     "1481396118675001425/IMG_20260311_225753.png?ex=69cf8165&is=69ce2fe5&hm=a44ee43a3d32a640ea6004005e5d7f20e858fa4abde492029904e2aebc351653&"
@@ -15,4 +17,4 @@ BRANDING_FOOTER_ICON_URL = (
     "1489340336491987017/Logo_No_letters_thubnail.png?ex=69d00fc6&is=69cebe46&hm=084115609e8e66fd46bc64407e4d55b1d864e509b2512124ca6c226ae272dfab&"
 )
 
-BRANDING_FOOTER_TEXT = "Blackwater Management ▫️ Property Of Blackwater"
+BRANDING_FOOTER_TEXT = "OCI Ticket System"

@@ -7,7 +7,7 @@ from typing import Any
 import aiohttp
 import discord
 
-log = logging.getLogger("bpg-bot.audit")
+log = logging.getLogger("oci-bot.audit")
 
 
 class AuditLogger:
@@ -44,7 +44,7 @@ class AuditLogger:
             for k, v in fields[:20]:
                 embed.add_field(name=k[:256], value=(v or ".")[:1024], inline=False)
         try:
-            await self._webhook.send(embed=embed, username="Blackwater Protection Group Audit", wait=False)
+            await self._webhook.send(embed=embed, username="Office of Community Investigations - OCI Audit", wait=False)
         except Exception:
             log.exception("Failed to send audit webhook message.")
 

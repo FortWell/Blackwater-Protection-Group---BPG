@@ -1,6 +1,6 @@
-# Blackwater Protection Group Bot
+# Office of Community Investigations - OCI Bot
 
-Official bot for Blackwater Protection Group (BPG).
+Official bot for Office of Community Investigations - OCI.
 
 Features:
 - Embed module: `/say`, `/send-message`, `/restore`
