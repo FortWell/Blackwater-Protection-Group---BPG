@@ -88,6 +88,7 @@ class BPGBot(commands.Bot):
             "cogs.global_bans",
             "cogs.staff",
             "cogs.utility",
+            "cogs.auto_role",
         ):
             await self.load_extension(extension)
             log.info("Loaded extension: %s", extension)
@@ -238,6 +239,27 @@ class BPGBot(commands.Bot):
             f"Connected as {self.user} ({self.user.id})",
             color=0x1F8B4C,
         )
+
+    async def on_member_join(self, member: discord.Member) -> None:
+        """Restore auto-roles when a member rejoins."""
+        try:
+            rows = await self.db.fetchall(
+                """
+                SELECT role_id FROM auto_role_associations
+                WHERE guild_id = ? AND user_id = ?
+                """,
+                (member.guild.id, member.id),
+            )
+
+            for (role_id,) in rows:
+                role = member.guild.get_role(role_id)
+                if role and not member.get_role(role_id):
+                    try:
+                        await member.add_roles(role, reason="Auto-role restoration")
+                    except discord.HTTPException:
+                        pass
+        except Exception:
+            pass
 
     async def on_app_command_completion(
         self,

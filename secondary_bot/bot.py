@@ -869,6 +869,165 @@ async def assign(interaction: discord.Interaction, case_id: str, investigator: d
     )
 
 
+# -------- Auto-Role Commands --------
+
+
+def _init_auto_role_db() -> None:
+    """Initialize auto-role tables in the database."""
+    path = _case_db_path()
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auto_role_associations (
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                role_id INTEGER NOT NULL,
+                PRIMARY KEY (guild_id, user_id, role_id)
+            )
+            """
+        )
+        conn.commit()
+
+
+def _get_user_auto_roles(user_id: int, guild_id: int) -> list[int]:
+    """Get all auto-role IDs for a user."""
+    path = _case_db_path()
+    with sqlite3.connect(path) as conn:
+        rows = conn.execute(
+            "SELECT role_id FROM auto_role_associations WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        ).fetchall()
+    return [row[0] for row in rows]
+
+
+def _add_user_auto_role(user_id: int, guild_id: int, role_id: int) -> bool:
+    """Add an auto-role for a user."""
+    path = _case_db_path()
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO auto_role_associations (guild_id, user_id, role_id) VALUES (?, ?, ?)",
+                (guild_id, user_id, role_id),
+            )
+            conn.commit()
+        return True
+    except sqlite3.Error:
+        return False
+
+
+def _remove_user_auto_role(user_id: int, guild_id: int, role_id: int) -> bool:
+    """Remove an auto-role for a user."""
+    path = _case_db_path()
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute(
+                "DELETE FROM auto_role_associations WHERE guild_id = ? AND user_id = ? AND role_id = ?",
+                (guild_id, user_id, role_id),
+            )
+            conn.commit()
+        return True
+    except sqlite3.Error:
+        return False
+
+
+@_command(name="auto-role-add", description="Add a role to auto-restore for your profile")
+@app_commands.describe(role="The role to automatically restore when you rejoin")
+async def auto_role_add(interaction: discord.Interaction, role: discord.Role) -> None:
+    """Add a role to the auto-role system."""
+    if interaction.guild is None:
+        await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+        return
+
+    if not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message("Permission denied.", ephemeral=True)
+        return
+
+    success = await asyncio.to_thread(
+        _add_user_auto_role,
+        interaction.user.id,
+        interaction.guild.id,
+        role.id,
+    )
+
+    if success:
+        embed = discord.Embed(
+            title="Auto-Role Added",
+            description=f"Role {role.mention} will be automatically restored for you when you rejoin.",
+            color=0x0B1E3D,
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    else:
+        await interaction.response.send_message("Failed to add role.", ephemeral=True)
+
+
+@_command(name="remove-auto-role", description="Remove a role from auto-restore")
+@app_commands.describe(role="The role to remove from auto-restore")
+async def remove_auto_role(interaction: discord.Interaction, role: discord.Role) -> None:
+    """Remove a role from the auto-role system."""
+    if interaction.guild is None:
+        await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+        return
+
+    if not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message("Permission denied.", ephemeral=True)
+        return
+
+    success = await asyncio.to_thread(
+        _remove_user_auto_role,
+        interaction.user.id,
+        interaction.guild.id,
+        role.id,
+    )
+
+    if success:
+        embed = discord.Embed(
+            title="Auto-Role Removed",
+            description=f"Role {role.mention} will no longer be automatically restored.",
+            color=0x0B1E3D,
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    else:
+        await interaction.response.send_message("Failed to remove role.", ephemeral=True)
+
+
+@_command(name="auto-role-list", description="List all auto-restore roles for your profile")
+async def auto_role_list(interaction: discord.Interaction) -> None:
+    """List all auto-role associations for the user."""
+    if interaction.guild is None:
+        await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+        return
+
+    role_ids = await asyncio.to_thread(
+        _get_user_auto_roles,
+        interaction.user.id,
+        interaction.guild.id,
+    )
+
+    if not role_ids:
+        embed = discord.Embed(
+            title="Auto-Roles",
+            description="You have no auto-restore roles configured.",
+            color=0x0B1E3D,
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    role_mentions = []
+    for role_id in role_ids:
+        role = interaction.guild.get_role(role_id)
+        if role:
+            role_mentions.append(role.mention)
+        else:
+            role_mentions.append(f"<@&{role_id}> (deleted)")
+
+    embed = discord.Embed(
+        title="Auto-Roles",
+        description="Roles that will be automatically restored when you rejoin:\n" + "\n".join(role_mentions),
+        color=0x0B1E3D,
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
 # -------- Startup --------
 
 
@@ -879,6 +1038,7 @@ async def setup_hook() -> None:
     shared_branding.BRANDING_FOOTER_ICON_URL = OCI_TICKET_FOOTER_ICON_URL
     shared_branding.BRANDING_FOOTER_TEXT = OCI_TICKET_FOOTER_TEXT
     await asyncio.to_thread(_init_case_db)
+    await asyncio.to_thread(_init_auto_role_db)
     await bot.load_extension("cogs.tickets")
     if COMMAND_GUILD is not None:
         bot.tree.copy_global_to(guild=COMMAND_GUILD)
@@ -918,6 +1078,27 @@ async def on_ready():
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} global commands")
     print(f"Logged in as {bot.user}")
+
+
+@bot.event
+async def on_member_join(member: discord.Member) -> None:
+    """Restore auto-roles when a member rejoins."""
+    try:
+        role_ids = await asyncio.to_thread(
+            _get_user_auto_roles,
+            member.id,
+            member.guild.id,
+        )
+
+        for role_id in role_ids:
+            role = member.guild.get_role(role_id)
+            if role and not member.get_role(role_id):
+                try:
+                    await member.add_roles(role, reason="Auto-role restoration")
+                except discord.HTTPException:
+                    pass
+    except Exception:
+        pass
 
 
 def main() -> None:

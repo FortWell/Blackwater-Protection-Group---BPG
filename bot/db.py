@@ -123,6 +123,16 @@ class Database:
             )
             """
         )
+        await self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auto_role_associations (
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                role_id INTEGER NOT NULL,
+                PRIMARY KEY (guild_id, user_id, role_id)
+            )
+            """
+        )
         await self.conn.commit()
 
     async def execute(self, query: str, params: tuple = ()) -> None:
