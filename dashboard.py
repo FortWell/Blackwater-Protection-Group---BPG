@@ -349,6 +349,14 @@ def _render_dashboard_html(
     selected_slot: SlotDefinition,
     slot_snapshots: dict[str, dict[str, Any] | None],
 ) -> str:
+    # Determine display name based on selected slot
+    if selected_slot.id == "primary":
+        display_branding_name = "Blackwater Protection Group"
+    elif selected_slot.id == "secondary":
+        display_branding_name = "Office of Community Investigations - OCI"
+    else:
+        display_branding_name = BRANDING_NAME
+    
     brand_thumb = html.escape(BRANDING_THUMBNAIL_URL)
     footer_text = html.escape(BRANDING_FOOTER_TEXT)
     footer_icon = html.escape(BRANDING_FOOTER_ICON_URL)
@@ -937,10 +945,10 @@ def _render_dashboard_html(
 <body>
   <main class="wrap">
     <section class="hero">
-      <img class="brand-mark" src="{brand_thumb}" alt="{BRANDING_NAME} logo">
+      <img class="brand-mark" src="{brand_thumb}" alt="{display_branding_name} logo">
       <div>
         <div class="eyebrow">Local control panel</div>
-        <h1>{BRANDING_NAME}</h1>
+        <h1>{display_branding_name}</h1>
         <div class="subtitle">
           Multi-slot dashboard for starting, stopping, and restarting local bot processes.
           This view is focused on <span class="muted">{selected_slot_name}</span>, whose status endpoint is exposed on
@@ -1070,7 +1078,7 @@ def _render_dashboard_html(
           </div>
           <div>
             <img src="{footer_icon}" alt="Footer icon">
-            <span>Property Of {BRANDING_NAME}</span>
+            <span>Property Of {display_branding_name}</span>
           </div>
         </div>
       </article>

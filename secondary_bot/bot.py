@@ -44,16 +44,16 @@ OCI_INVESTIGATOR_ROLE_ID = 1320364221707321394
 PRIORITY_SUPPORT_OPEN_ROLE_ID = 1428712941749796954
 
 OCI_TICKET_THUMBNAIL_URL = (
-    "https://cdn.discordapp.com/attachments/1327068360319565876/"
-    "1489758499134242877/Office_of_Community_Investigations_logo.png?ex=69d23df8&is=69d0ec78&hm=43e393aa18c72a4df4de014674a718f1304409e805a9b8f1caf0fda37382f3ad&"
+    "https://cdn.discordapp.com/attachments/1400844192833474562/"
+    "1492283673590894643/Just_blue.avif?ex=69dac4f9&is=69d97379&hm=62820938b2852eebe54861001cd222b68e90b519955af2271887ada322e10f46&"
 )
 OCI_TICKET_IMAGE_URL = (
-    "https://cdn.discordapp.com/attachments/1327068360319565876/"
-    "1489758898670796881/IMG_20260404_014939.png?ex=69d23e57&is=69d0ecd7&hm=1adb98f95efefd15c2b44990f7f0fae4189a6895baef5708ef99d4d0bd5a2a3f&"
+    "https://cdn.discordapp.com/attachments/1400844192833474562/"
+    "1492283673590894643/Just_blue.avif?ex=69dac4f9&is=69d97379&hm=62820938b2852eebe54861001cd222b68e90b519955af2271887ada322e10f46&"
 )
 OCI_TICKET_FOOTER_ICON_URL = (
-    "https://cdn.discordapp.com/attachments/1327068360319565876/"
-    "1489758499134242877/Office_of_Community_Investigations_logo.png?ex=69d23df8&is=69d0ec78&hm=43e393aa18c72a4df4de014674a718f1304409e805a9b8f1caf0fda37382f3ad&"
+    "https://cdn.discordapp.com/attachments/1400844192833474562/"
+    "1492283673590894643/Just_blue.avif?ex=69dac4f9&is=69d97379&hm=62820938b2852eebe54861001cd222b68e90b519955af2271887ada322e10f46&"
 )
 OCI_TICKET_FOOTER_TEXT = "OCI Ticket System"
 
