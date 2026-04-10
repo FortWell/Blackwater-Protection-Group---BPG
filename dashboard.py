@@ -1163,6 +1163,8 @@ def _render_dashboard_html(
         }},
       }});
       const data = await response.json();
+      // Wait a bit for the bot to start/stop before refreshing
+      await new Promise(resolve => setTimeout(resolve, 1500));
       await refresh();
       alert(data.message || "Action completed.");
     }}
@@ -1274,8 +1276,11 @@ def _render_dashboard_html(
         button.disabled = true;
         try {{
           await postAction(button.dataset.action);
-        }} finally {{
+          // Add extra refresh after action completes to ensure status is updated
+          await new Promise(resolve => setTimeout(resolve, 500));
           await refresh();
+        }} finally {{
+          button.disabled = false;
         }}
       }});
     }});
@@ -1289,8 +1294,11 @@ def _render_dashboard_html(
           }} else if (button.dataset.settingAction === "lockdown-off") {{
             await postLockdown(false);
           }}
-        }} finally {{
+          // Add delay to ensure refresh after setting change
+          await new Promise(resolve => setTimeout(resolve, 500));
           await refresh();
+        }} finally {{
+          button.disabled = false;
         }}
       }});
     }});
